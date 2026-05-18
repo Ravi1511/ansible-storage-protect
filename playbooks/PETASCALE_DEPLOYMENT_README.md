@@ -549,6 +549,33 @@ ansible-playbook playbooks/petascale_uninstall.yml \
   -v
 ```
 
+## Post-Uninstall Cleanup (Optional)
+
+After successful uninstall, you may want to:
+
+### 1. Remove Node from SP Server
+
+```bash
+# On SP Server, run:
+dsmadmc -id=admin -pa=password
+remove node <nodename>
+```
+
+### 2. Clean Up Backup Directory
+
+```bash
+# On each BA client host:
+rm -rf /opt/baClientPackagesBk
+```
+
+### 3. Remove Configuration Backups
+
+```bash
+# On each BA client host:
+rm -f /opt/tivoli/tsm/client/ba/bin/dsm.opt.bk
+rm -f /opt/tivoli/tsm/client/ba/bin/dsm.sys.bk
+```
+
 ---
 
 # Configuration Management
@@ -670,7 +697,6 @@ sudo find /tmp -type f -atime +7 -delete
 ```
 
 ## Common Issues
-
 ### Issue 1: Package Not Found on Remote Node
 
 **Error:**
