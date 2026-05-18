@@ -17,24 +17,45 @@
 - name: Set ba_client_action dynamically based on state
   ansible.builtin.include_tasks: local_repo_check.yml
   when: ba_client_state == "present"
+  tags:
+    - install
+    - upgrade
+    - never
 
 - name: Set ba_client_action dynamically based on state
   ansible.builtin.include_tasks: determine_action.yml
   when: ba_client_state == "present"
+  tags:
+    - install
+    - upgrade
+    - never
 
 - name: Gather system info for compatibility checks
   ansible.builtin.include_role:
     name: system_info
   when: ba_client_action is defined and ba_client_state == "present"
+  tags:
+    - install
+    - upgrade
+    - never
 
 - name: Run install tasks
   ansible.builtin.include_tasks: ba_client_install_linux.yml
   when: ba_client_action is defined and ba_client_action == "install" and ba_client_state == "present"
+  tags:
+    - install
+    - never
 
 - name: Run upgrade tasks
   ansible.builtin.include_tasks: ba_client_upgrade_linux.yml
   when: ba_client_action is defined and ba_client_action == "upgrade" and ba_client_state == "present"
+  tags:
+    - upgrade
+    - never
 
 - name: Run uninstall tasks
   ansible.builtin.include_tasks: ba_client_uninstall_linux.yml
   when: ba_client_state == "absent"
+  tags:
+    - uninstall
+    - always

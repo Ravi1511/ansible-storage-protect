@@ -1,0 +1,45 @@
+---
+# Skip local repo check if tar_file_path is already provided
+- name: Check if tar_file_path is already provided
+  ansible.builtin.set_fact:
+    tar_file_provided: "{{ tar_file_path is defined and tar_file_path | length > 0 }}"
+
+- name: Use provided tar_file_path
+  ansible.builtin.set_fact:
+    version_available: true
+  when: tar_file_provided
+
+- name: Display provided tar file path
+  ansible.builtin.debug:
+    msg: "Using provided HSM Client tar file: {{ tar_file_path }}"
+  when: tar_file_provided
+
+# Only check local repo if tar_file_path was not provided
+- name: Check if HSM Client tar file exists in local repository
+  ansible.builtin.stat:
+    path: "{{ hsm_client_tar_repo }}/{{ hsm_client_version }}-TIV-TSMHSM-LinuxX86.tar"
+  delegate_to: localhost
+  become: false
+  register: tar_file_stat
+  when: not tar_file_provided
+
+- name: Set tar file path if it exists in repo
+  ansible.builtin.set_fact:
+    tar_file_path: "{{ hsm_client_tar_repo }}/{{ hsm_client_version }}-TIV-TSMHSM-LinuxX86.tar"
+    version_available: true
+  when: not tar_file_provided and tar_file_stat.stat.exists
+
+- name: Fail if tar file does not exist in repo
+  ansible.builtin.fail:
+    msg: >
+      HSM Client version {{ hsm_client_version }} not found in local repository.
+      Expected path: {{ hsm_client_tar_repo }}/{{ hsm_client_version }}-TIV-TSMHSM-LinuxX86.tar
+      Please ensure the tar file exists in the specified location or provide tar_file_path parameter.
+  when: not tar_file_provided and not tar_file_stat.stat.exists
+
+- name: Display tar file path from repo
+  ansible.builtin.debug:
+    msg: "HSM Client tar file found at: {{ tar_file_path }}"
+  when: not tar_file_provided and tar_file_stat.stat.exists
+
+# Made with Bob

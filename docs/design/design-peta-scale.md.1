@@ -1,0 +1,1567 @@
+# IBM Storage Protect Petascale Solution - Ansible Automation Design Document
+
+## Document Information
+
+- **Document Title**: Petascale Data Protection Solution Design
+- **Version**: 1.0
+- **Date**: 2026-04-01
+- **Status**: Active
+- **Author**: IBM Storage Protect Ansible Team
+
+---
+
+## Table of Contents
+
+1. [Introduction](#introduction)
+2. [Document Scope](#document-scope)
+3. [Architecture Overview](#architecture-overview)
+4. [Petascale Characteristics](#petascale-characteristics)
+5. [Component Details](#component-details)
+6. [Lifecycle Management](#lifecycle-management)
+7. [Data Flow Diagrams](#data-flow-diagrams)
+8. [Configuration Management](#configuration-management)
+9. [Storage Architecture](#storage-architecture)
+10. [Performance & Scalability](#performance--scalability)
+11. [Security Considerations](#security-considerations)
+12. [High Availability & Disaster Recovery](#high-availability--disaster-recovery)
+13. [Monitoring & Operations](#monitoring--operations)
+14. [Testing Strategy](#testing-strategy)
+15. [Usage Examples](#usage-examples)
+16. [Troubleshooting Guide](#troubleshooting-guide)
+17. [References](#references)
+
+---
+
+## Introduction
+
+### Purpose
+
+The Petascale Data Protection Solution provides comprehensive Ansible automation for deploying, managing, and operating IBM Storage Protect servers at petascale capacity (500+ TB). This design document describes the architecture, components, and workflows for automating the complete lifecycle of petascale Storage Protect deployments using Ansible.
+
+### What is Petascale?
+
+**Petascale** refers to data protection deployments capable of managing storage capacities in the range of 500 terabytes to multiple petabytes. These deployments require:
+
+- **Massive Storage Capacity**: 500+ TB of file storage
+- **High Performance**: Support for 1000+ concurrent client sessions
+- **Enterprise-Grade Hardware**: 32+ CPU cores, 128+ GB RAM
+- **Optimized Configuration**: Large-scale database and storage pool settings
+- **Advanced Features**: Replication, high availability, disaster recovery
+
+### Key Objectives
+
+1. **Automated Deployment**: Complete automation of petascale SP Server installation
+2. **Lifecycle Management**: Install, upgrade, and uninstall operations
+3. **Configuration Management**: Automated configuration of large-scale settings
+4. **Storage Orchestration**: Automated preparation of petascale storage infrastructure
+5. **Consistency**: Repeatable, reliable deployments across environments
+6. **Scalability**: Support for multi-site and distributed deployments
+
+### Business Value
+
+- **Reduced Deployment Time**: Hours instead of days for petascale deployments
+- **Consistency**: Eliminate configuration drift and human errors
+- **Scalability**: Easily replicate deployments across multiple sites
+- **Operational Efficiency**: Simplified management of complex infrastructure
+- **Cost Optimization**: Reduced labor costs and faster time-to-value
+- **Risk Mitigation**: Validated, tested deployment procedures
+
+---
+
+## Document Scope
+
+### Supported Platforms
+
+#### Operating Systems
+
+| OS Family | Versions | Architecture |
+|-----------|----------|--------------|
+| Red Hat Enterprise Linux | 7.x, 8.x, 9.x | x86_64 |
+| SUSE Linux Enterprise Server | 12 SP5, 15 SPx | x86_64 |
+| Ubuntu Server | 18.04 LTS, 20.04 LTS, 22.04 LTS | x86_64 |
+
+#### IBM Storage Protect Versions
+
+- IBM Storage Protect Server 8.1.23+
+- IBM Storage Protect Server 8.1.24+
+- IBM Storage Protect Server 8.1.25+
+- IBM Storage Protect Server 8.1.27+
+
+### Lifecycle Operations
+
+This design covers the following lifecycle operations for petascale deployments:
+
+#### 1. Installation
+- Fresh installation of SP Server (large configuration)
+- Storage infrastructure preparation (500+ TB)
+- Initial server configuration
+- Blueprint-based deployment
+- Post-installation validation
+
+#### 2. Upgrade
+- Version upgrade from 8.1.x to 8.1.y
+- Pre-upgrade validation
+- Automated upgrade execution
+- Post-upgrade verification
+- Rollback procedures
+
+#### 3. Uninstallation
+- Complete server removal
+- Storage cleanup (optional)
+- Configuration cleanup
+- Verification of clean state
+
+#### 4. Configuration Management
+- Server parameter tuning
+- Storage pool configuration
+- Policy management
+- Schedule configuration
+- Performance optimization
+
+### Out of Scope
+
+The following items are not covered in this design document:
+
+- **Client Management**: BA Client installation (see [design-ba-client.md](design-ba-client.md))
+- **Storage Agent**: LAN-Free configuration (see [design-storage-agent.md](design-storage-agent.md))
+- **Operations Center**: OC setup (see [design-oc.md](design-oc.md))
+- **Application Protection**: DB2, SAP, Oracle backup configurations
+- **Cloud Integration**: Cloud storage tier configuration
+- **Container Deployments**: Kubernetes/OpenShift deployments
+- **Windows Platforms**: Windows Server deployments
+
+---
+
+## Architecture Overview
+
+### High-Level Architecture
+
+```mermaid
+graph TB
+    subgraph "Ansible Control Node"
+        User[Administrator/CI-CD]
+        AnsibleCLI[Ansible CLI]
+        Inventory[Petascale Inventory]
+        Playbooks[Playbooks]
+        Vault[Ansible Vault<br/>Encrypted Secrets]
+    end
+    
+    subgraph "Orchestration Layer"
+        Blueprint[sp_server_blueprint.yml<br/>Orchestrator]
+        InstallPB[sp_server_install_playbook.yml]
+        UpgradePB[sp_server_upgrade_playbook.yml]
+        UninstallPB[sp_server_uninstall_playbook.yml]
+        StoragePB[storage_prepare_playbook.yml]
+    end
+    
+    subgraph "Execution Layer"
+        SPInstallRole[sp_server_install Role]
+        StoragePrepRole[storage_prepare Role]
+        SPFactsRole[sp_server_facts Role]
+        
+        SPModule[sp_server.py Module]
+        SPConfigModule[sp_server_configure.py Module]
+        SPFactsModule[sp_server_facts.py Module]
+    end
+    
+    subgraph "Target Infrastructure - Petascale Server"
+        SPServer[SP Server Instance<br/>Large Configuration]
+        
+        subgraph "Storage Infrastructure"
+            DB[(Database<br/>4-4.05 TB)]
+            ActiveLog[(Active Log<br/>550-600 GB)]
+            ArchiveLog[(Archive Log<br/>4-4.05 TB)]
+            FileStorage[(File Storage<br/>500-500.05 TB)]
+            Backup[(Backup<br/>16-16.05 TB)]
+        end
+        
+        subgraph "System Resources"
+            CPU[32+ CPU Cores]
+            RAM[128+ GB RAM]
+            Network[10/25/40/100 GbE]
+        end
+    end
+    
+    User --> AnsibleCLI
+    AnsibleCLI --> Inventory
+    AnsibleCLI --> Playbooks
+    AnsibleCLI --> Vault
+    
+    Playbooks --> Blueprint
+    Blueprint --> InstallPB
+    Blueprint --> StoragePB
+    InstallPB --> UpgradePB
+    InstallPB --> UninstallPB
+    
+    InstallPB --> SPInstallRole
+    StoragePB --> StoragePrepRole
+    SPInstallRole --> SPFactsRole
+    
+    SPInstallRole --> SPModule
+    SPInstallRole --> SPConfigModule
+    SPFactsRole --> SPFactsModule
+    
+    SPModule --> SPServer
+    SPConfigModule --> SPServer
+    SPFactsModule --> SPServer
+    
+    SPServer --> DB
+    SPServer --> ActiveLog
+    SPServer --> ArchiveLog
+    SPServer --> FileStorage
+    SPServer --> Backup
+    
+    SPServer -.-> CPU
+    SPServer -.-> RAM
+    SPServer -.-> Network
+    
+    style Blueprint fill:#ffd700
+    style SPServer fill:#198038
+    style FileStorage fill:#ff6b6b
+    style CPU fill:#4ecdc4
+    style RAM fill:#4ecdc4
+    style Network fill:#4ecdc4
+```
+
+### Layered Architecture
+
+```mermaid
+graph TB
+    subgraph "Layer 1: User Interface"
+        CLI[Ansible CLI]
+        CICD[CI/CD Pipeline]
+        Tower[Ansible Tower/AWX]
+    end
+    
+    subgraph "Layer 2: Orchestration"
+        Blueprint[Blueprint Orchestrator]
+        StateManager[State Management]
+        Validator[Validation Logic]
+    end
+    
+    subgraph "Layer 3: Playbooks"
+        InstallPlaybook[Install Playbook]
+        UpgradePlaybook[Upgrade Playbook]
+        UninstallPlaybook[Uninstall Playbook]
+        StoragePlaybook[Storage Playbook]
+        ConfigPlaybook[Configure Playbook]
+    end
+    
+    subgraph "Layer 4: Roles"
+        InstallRole[sp_server_install]
+        StorageRole[storage_prepare]
+        FactsRole[sp_server_facts]
+    end
+    
+    subgraph "Layer 5: Modules"
+        ServerModule[sp_server.py]
+        ConfigModule[sp_server_configure.py]
+        FactsModule[sp_server_facts.py]
+    end
+    
+    subgraph "Layer 6: Module Utilities"
+        ServerUtils[sp_server_utils.py]
+        DsmadmcAdapter[dsmadmc_adapter.py]
+        SPUtils[sp_utils.py]
+        Constants[sp_server_constants.py]
+    end
+    
+    subgraph "Layer 7: Target Infrastructure"
+        Hosts[Petascale SP Servers]
+        Storage[Storage Systems]
+        Network[Network Infrastructure]
+    end
+    
+    CLI --> Blueprint
+    CICD --> Blueprint
+    Tower --> Blueprint
+    
+    Blueprint --> StateManager
+    Blueprint --> Validator
+    Blueprint --> InstallPlaybook
+    Blueprint --> StoragePlaybook
+    
+    InstallPlaybook --> InstallRole
+    UpgradePlaybook --> InstallRole
+    UninstallPlaybook --> InstallRole
+    StoragePlaybook --> StorageRole
+    ConfigPlaybook --> InstallRole
+    
+    InstallRole --> ServerModule
+    InstallRole --> ConfigModule
+    StorageRole --> StorageRole
+    FactsRole --> FactsModule
+    
+    ServerModule --> ServerUtils
+    ConfigModule --> DsmadmcAdapter
+    FactsModule --> SPUtils
+    ServerUtils --> Constants
+    
+    ServerUtils --> Hosts
+    DsmadmcAdapter --> Hosts
+    SPUtils --> Storage
+    
+    style Blueprint fill:#ffd700
+    style InstallRole fill:#ee538b
+    style ServerModule fill:#0f62fe
+    style Hosts fill:#198038
+```
+
+### Component Interaction Matrix
+
+| Component | Interacts With | Purpose |
+|-----------|----------------|---------|
+| **Blueprint Orchestrator** | Install/Storage/Configure Playbooks | Coordinates multi-phase deployment |
+| **Install Playbook** | sp_server_install Role | Manages server installation lifecycle |
+| **Upgrade Playbook** | sp_server_install Role | Handles version upgrades |
+| **Uninstall Playbook** | sp_server_install Role | Removes server installation |
+| **Storage Playbook** | storage_prepare Role | Prepares petascale storage |
+| **sp_server_install Role** | sp_server.py, sp_server_configure.py | Executes installation/configuration |
+| **storage_prepare Role** | System commands (LVM, filesystem) | Creates storage infrastructure |
+| **sp_server.py Module** | sp_server_utils.py, IBM IM | Installs/upgrades/uninstalls server |
+| **sp_server_configure.py** | dsmadmc_adapter.py | Configures server settings |
+| **dsmadmc_adapter.py** | dsmadmc CLI | Executes administrative commands |
+
+---
+
+## Petascale Characteristics
+
+### What Makes It Petascale?
+
+#### Storage Capacity
+
+The **large** configuration is designed for petascale deployments:
+
+| Storage Component | Size Range | Purpose |
+|-------------------|------------|---------|
+| **Database** | 4-4.05 TB | Server database and metadata |
+| **Active Log** | 550-600 GB | Transaction logging (high performance) |
+| **Archive Log** | 4-4.05 TB | Archive log storage |
+| **File Storage** | 500-500.05 TB | Primary data storage (PETASCALE) |
+| **Backup** | 16-16.05 TB | Database backup storage |
+| **Total** | ~520+ TB | Complete storage infrastructure |
+
+#### Performance Characteristics
+
+| Metric | Petascale (Large) | Standard (Medium) | Comparison |
+|--------|-------------------|-------------------|------------|
+| **Max Sessions** | 1000 | 500 | 2x capacity |
+| **Active Log Size** | 524,032 MB | 131,072 MB | 4x larger |
+| **DB Backup Streams** | 8+ | 4 | 2x parallelism |
+| **CPU Cores** | 32+ | 16+ | 2x processing |
+| **RAM** | 128+ GB | 64+ GB | 2x memory |
+| **Network** | 25/40/100 GbE | 10 GbE | 2.5-10x bandwidth |
+
+#### Hardware Requirements
+
+**Minimum Petascale Configuration:**
+
+```yaml
+CPU:
+  cores: 32
+  architecture: x86_64
+  recommended: 48+ cores for optimal performance
+
+Memory:
+  minimum: 128 GB
+  recommended: 256 GB
+  type: DDR4 ECC
+
+Storage:
+  database:
+    capacity: 4 TB
+    type: SSD/NVMe (high IOPS)
+    raid: RAID 10
+  active_log:
+    capacity: 600 GB
+    type: SSD/NVMe (ultra-high IOPS)
+    raid: RAID 1 or RAID 10
+  archive_log:
+    capacity: 4 TB
+    type: SSD/HDD hybrid
+    raid: RAID 5/6
+  file_storage:
+    capacity: 500 TB
+    type: High-capacity HDD/SSD
+    raid: RAID 6 or distributed storage
+  backup:
+    capacity: 16 TB
+    type: HDD
+    raid: RAID 5/6
+
+Network:
+  primary: 25 GbE or higher
+  backup: 10 GbE (dedicated backup network)
+  management: 1 GbE
+  features:
+    - Jumbo frames (MTU 9000)
+    - QoS for backup traffic
+    - Link aggregation (LACP)
+
+Operating System:
+  - RHEL 8.x/9.x (recommended)
+  - SLES 15 SPx
+  - Ubuntu 22.04 LTS
+  - Kernel: 4.18+ (for performance features)
+```
+
+### Sizing Comparison
+
+```mermaid
+graph LR
+    subgraph "XSmall"
+        XS_Storage[10 TB]
+        XS_Sessions[75]
+        XS_CPU[8 cores]
+        XS_RAM[32 GB]
+    end
+    
+    subgraph "Small"
+        S_Storage[38 TB]
+        S_Sessions[250]
+        S_CPU[16 cores]
+        S_RAM[64 GB]
+    end
+    
+    subgraph "Medium"
+        M_Storage[180 TB]
+        M_Sessions[500]
+        M_CPU[16 cores]
+        M_RAM[64 GB]
+    end
+    
+    subgraph "Large - PETASCALE"
+        L_Storage[500+ TB]
+        L_Sessions[1000+]
+        L_CPU[32+ cores]
+        L_RAM[128+ GB]
+    end
+    
+    XS_Storage --> S_Storage
+    S_Storage --> M_Storage
+    M_Storage --> L_Storage
+    
+    style L_Storage fill:#ff6b6b
+    style L_Sessions fill:#ff6b6b
+    style L_CPU fill:#ff6b6b
+    style L_RAM fill:#ff6b6b
+```
+
+---
+
+## Component Details
+
+### 1. Playbook Layer
+
+#### 1.1 Petascale Blueprint Orchestrator
+
+**File**: [`playbooks/petascale_deployment_blueprint.yml`](../../playbooks/petascale_deployment_blueprint.yml)
+
+**Purpose**: Orchestrates the complete petascale deployment in three phases with petascale-specific configurations.
+
+**Structure**:
+```yaml
+---
+# Phase 1: Initial Installation (Petascale)
+- import_playbook: ibm.storage_protect.petascale_install_playbook.yml
+
+# Phase 2: Storage Preparation (Petascale - 500+ TB)
+- import_playbook: ibm.storage_protect.petascale_storage_prepare_playbook.yml
+
+# Phase 3: Configuration (Petascale Settings)
+- import_playbook: ibm.storage_protect.petascale_configure_playbook.yml
+```
+
+**Key Features**:
+- Sequential execution with dependency management
+- Fail-fast error handling
+- State preservation between phases
+- Idempotent operations
+
+**Variables**:
+```yaml
+# Required for petascale deployment
+sp_server_version: "8.1.27.0"
+sp_server_state: "present"
+server_blueprint: true
+server_size: "large"
+storage_prepare_size: "large"
+sp_server_bin_repo: "/path/to/packages"
+ssl_password: "{{ vault_ssl_password }}"
+```
+
+#### 1.2 Petascale Installation Playbook
+
+**File**: [`playbooks/petascale_install_playbook.yml`](../../playbooks/petascale_install_playbook.yml)
+
+**Purpose**: Installs IBM Storage Protect Server with petascale-specific configuration (large server size, 500+ TB storage).
+
+**Operations**:
+1. Pre-installation validation
+2. System compatibility checks
+3. Package installation via IBM Installation Manager
+4. Initial configuration
+5. Service setup and startup
+6. Post-installation validation
+
+**Parameters**:
+```yaml
+sp_server_state: "present"        # present/absent/upgrade
+sp_server_version: "8.1.27.0"     # Target version
+sp_server_bin_repo: "/repo/path"  # Package repository
+ssl_password: "SecurePass@123"    # SSL certificate password
+target_hosts: "sp_servers"        # Inventory group
+```
+
+#### 1.3 Petascale Upgrade Playbook
+
+**File**: [`playbooks/petascale_upgrade_playbook.yml`](../../playbooks/petascale_upgrade_playbook.yml)
+
+**Purpose**: Upgrades existing petascale SP Server to a newer version while maintaining large-scale configurations.
+
+**Operations**:
+1. Pre-upgrade validation
+2. Backup current configuration
+3. Stop server services
+4. Upgrade packages
+5. Database migration (if needed)
+6. Restart services
+7. Post-upgrade validation
+
+**Parameters**:
+```yaml
+sp_server_state: "upgrade"
+sp_server_version: "8.1.27.0"     # Target version
+sp_server_bin_repo: "/repo/path"
+```
+
+#### 1.4 Petascale Uninstall Playbook
+
+**File**: [`playbooks/petascale_uninstall_playbook.yml`](../../playbooks/petascale_uninstall_playbook.yml)
+
+**Purpose**: Removes petascale SP Server installation with optional cleanup of 500+ TB storage infrastructure.
+
+**Operations**:
+1. Stop all services
+2. Backup configuration (optional)
+3. Uninstall packages
+4. Remove installation directories
+5. Clean up system configuration
+6. Verification
+
+**Parameters**:
+```yaml
+sp_server_state: "absent"
+clean_up: false                   # Optional: clean storage
+```
+
+#### 1.5 Petascale Storage Preparation Playbook
+
+**File**: [`playbooks/petascale_storage_prepare_playbook.yml`](../../playbooks/petascale_storage_prepare_playbook.yml)
+
+**Purpose**: Prepares petascale storage infrastructure (500+ TB file storage, 4TB database, 600GB active log).
+
+**Operations**:
+1. Disk discovery and validation
+2. LVM volume group creation
+3. Logical volume creation (large sizes)
+4. Filesystem creation (ext4/xfs)
+5. Mount point configuration
+6. Permission setting
+7. Verification
+
+**Parameters**:
+```yaml
+storage_prepare_size: "large"     # xsmall/small/medium/large
+instance_dir: "/tsminst1"
+clean_up: false                   # For cleanup operations
+```
+
+#### 2.3 petascale_server_facts Role
+
+**Location**: [`roles/petascale_server_facts/`](../../roles/petascale_server_facts/)
+
+**Purpose**: Gathers petascale-specific facts and metrics about SP Server installation.
+
+**Structure**:
+```
+roles/petascale_server_facts/
+├── README.md
+├── defaults/main.yml
+├── meta/main.yml
+└── tasks/
+    ├── main.yml
+    ├── gather_petascale_metrics.yml    # Collect petascale metrics
+    └── validate_petascale_config.yml   # Validate large configuration
+```
+
+**Collected Facts**:
+- Server version and installation status
+- Petascale configuration (1000+ sessions, 500+ TB storage)
+- Performance metrics (throughput, IOPS)
+- Storage utilization across 500+ TB
+- Active sessions and capacity
+
+### 3. Module Layer
+
+#### 3.1 petascale_server Module
+
+**Location**: [`plugins/modules/petascale_server.py`](../../plugins/modules/petascale_server.py)
+
+**Purpose**: Core module for petascale SP Server lifecycle management with large-scale optimizations.
+
+**Operations**:
+- `install`: Install petascale server (large configuration)
+- `upgrade`: Upgrade petascale server
+- `uninstall`: Remove petascale server
+- `configure`: Apply petascale-specific configuration
+
+**Key Parameters**:
+```python
+module_args = dict(
+    state=dict(type='str', required=True,
+               choices=['present', 'absent', 'upgrade']),
+    version=dict(type='str', required=False),
+    bin_repo=dict(type='str', required=False),
+    ssl_password=dict(type='str', required=False, no_log=True),
+    instance_dir=dict(type='str', default='/tsminst1'),
+    server_size=dict(type='str', default='large',
+                    choices=['large']),  # Petascale only supports large
+    max_sessions=dict(type='int', default=1000),
+    storage_capacity_tb=dict(type='int', default=500),
+    # ... additional petascale parameters
+)
+```
+
+#### 3.2 petascale_server_configure Module
+
+**Location**: [`plugins/modules/petascale_server_configure.py`](../../plugins/modules/petascale_server_configure.py)
+
+**Purpose**: Configures SP Server with petascale-specific settings.
+
+**Configuration Areas**:
+- Server parameters (1000+ sessions, large buffer pools)
+- Storage pools (500+ TB capacity)
+- Policy domains for petascale workloads
+- Schedules (8+ parallel backup streams)
+- Performance tuning for petascale operations
+- Database backup configuration (8 streams, compression)
+
+**Petascale-Specific Settings**:
+```python
+# Petascale server configuration
+petascale_config = {
+    'MAXSESSIONS': 1000,
+    'MOVEBATCHSIZE': 5000,
+    'EXPINTERVAL': 24,
+    'ACTLOGRETENTION': 7,
+    'ARCHLOGRETENTION': 365,
+    'TXNGROUPMAX': 4096,
+    'BUFFPOOLSIZE': 524288,  # 512 GB
+    'DBMEMPERCENT': 80,
+    'MOVERDEDUPBUFSIZE': 4096,
+    'RESOURCEUTILIZATION': 10,
+    # ... additional petascale parameters
+}
+```
+
+#### 3.3 petascale_server_facts Module
+
+**Location**: [`plugins/modules/petascale_server_facts.py`](../../plugins/modules/petascale_server_facts.py)
+
+**Purpose**: Collects petascale-specific facts about SP Server installation.
+
+**Returned Facts**:
+```python
+petascale_facts = {
+    'sp_server_version': '8.1.27.0',
+    'sp_server_installed': True,
+    'sp_server_running': True,
+    'sp_server_size': 'large',
+    'petascale_enabled': True,
+    'database_size_gb': 3500,
+    'storage_capacity_tb': 520,
+    'file_storage_tb': 500,
+    'storage_pools': [...],
+    'active_sessions': 450,
+    'max_sessions': 1000,
+    'session_utilization_percent': 45,
+    'backup_throughput_gbps': 15,
+    # ... additional petascale metrics
+}
+```
+
+### 4. Module Utilities Layer
+
+#### 4.1 petascale_server_utils.py
+
+**Location**: [`plugins/module_utils/petascale_server_utils.py`](../../plugins/module_utils/petascale_server_utils.py)
+
+**Functions**:
+- `validate_petascale_hardware()`: Validates hardware meets petascale requirements (32+ cores, 128+ GB RAM)
+- `get_petascale_storage_requirements()`: Returns storage requirements for petascale (500+ TB)
+- `calculate_petascale_performance()`: Calculates expected performance metrics
+- `format_petascale_config()`: Formats petascale configuration parameters
+- `validate_petascale_version()`: Validates SP version supports petascale features
+- `check_petascale_capacity()`: Monitors petascale storage capacity
+
+#### 4.2 petascale_storage_utils.py
+
+**Location**: [`plugins/module_utils/petascale_storage_utils.py`](../../plugins/module_utils/petascale_storage_utils.py)
+
+**Functions**:
+- `discover_petascale_disks()`: Discovers disks for 500+ TB storage
+- `validate_disk_capacity()`: Validates sufficient disk capacity
+- `create_petascale_lvm()`: Creates LVM configuration for petascale
+- `optimize_filesystem()`: Optimizes filesystem for large-scale operations
+- `calculate_raid_overhead()`: Calculates RAID overhead for petascale storage
+
+### 2. Role Layer
+
+#### 2.1 petascale_server_install Role
+
+**Location**: [`roles/petascale_server_install/`](../../roles/petascale_server_install/)
+
+**Structure**:
+```
+roles/petascale_server_install/
+├── README.md
+├── defaults/main.yml              # Petascale default variables
+├── meta/main.yml                  # Role metadata
+├── tasks/
+│   ├── main.yml                   # Task dispatcher
+│   ├── petascale_prechecks_linux.yml      # Hardware validation (32+ cores, 128+ GB RAM)
+│   ├── petascale_install_linux.yml        # Installation with large config
+│   ├── petascale_configuration_linux.yml  # Petascale-specific configuration
+│   ├── petascale_postchecks_linux.yml     # Validation (1000+ sessions)
+│   ├── petascale_uninstall_linux.yml      # Uninstallation
+│   └── petascale_clean_config.yml         # Configuration cleanup
+├── templates/
+│   ├── petascale_install_response.xml.j2  # Installation response file
+│   ├── petascale_uninstall_response.xml.j2
+│   ├── petascale_basics.j2                # Large server configuration
+│   ├── petascale_policy.j2                # Petascale policy definitions
+│   ├── petascale_schedules.j2             # Petascale schedules (8 streams)
+│   ├── petascale_cntrpool.j2              # Container pool (500+ TB)
+│   └── petascale_maintenance.j2           # Maintenance config
+└── vars/
+    └── main.yml                           # Petascale-specific variables
+```
+
+**Default Variables** (Petascale-relevant):
+```yaml
+# Server sizing
+server_size: 'large'
+
+# Active log size (MB)
+act_log_size:
+  large: 524032                    # ~512 GB
+
+# Maximum concurrent sessions
+max_sessions:
+  large: 1000
+
+# Database backup configuration
+dbbk_streams: "8"                  # Parallel streams
+dbbk_compress: "YES"
+maxcap: "500G"                     # Max capacity per stream
+
+# Server configuration
+server_blueprint: true
+```
+
+#### 2.2 petascale_storage_prepare Role
+
+**Location**: [`roles/petascale_storage_prepare/`](../../roles/petascale_storage_prepare/)
+
+**Structure**:
+```
+roles/petascale_storage_prepare/
+├── README.md
+├── defaults/main.yml              # Petascale storage defaults
+├── meta/main.yml                  # Role metadata
+├── tasks/
+│   ├── main.yml                   # Task dispatcher
+│   ├── petascale_storage_prepare_linux.yml   # Storage preparation
+│   ├── petascale_storage_validate_linux.yml  # Disk validation
+│   └── petascale_storage_cleanup_linux.yml   # Storage cleanup
+└── vars/
+    └── main.yml                   # Petascale storage variables
+```
+
+**Storage Size Definitions** (Petascale):
+```yaml
+petascale_storage_config:
+  TSMdbspace: [4000, 4050]       # 4-4.05 TB
+  TSMalog: [550, 600]            # 550-600 GB
+  TSMarchlog: [4000, 4050]       # 4-4.05 TB
+  TSMfile: [500000, 500050]      # 500-500.05 TB (PETASCALE PRIMARY STORAGE)
+  TSMbkup: [16000, 16050]        # 16-16.05 TB
+```
+
+---
+
+## Lifecycle Management
+
+### Installation Workflow
+
+#### Complete Installation Flow
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant Blueprint
+    participant InstallPB as Install Playbook
+    participant StoragePB as Storage Playbook
+    participant ConfigPB as Configure Playbook
+    participant Role as sp_server_install Role
+    participant Module as sp_server Module
+    participant Target as Target Server
+
+    Admin->>Admin: Establish password less authentication between client nodes and managed nodes
+    Admin->>Admin: create inventory file with node detail<br/>server nodes<br/>client nodes<br/>HSM nodes
+    Admin->>Blueprint: ansible-playbook petascale_deployment_blueprint.yml
+    
+    Note over Blueprint: Phase 1: Installation
+    Blueprint->>InstallPB: Execute installation
+    InstallPB->>Role: Invoke sp_server_install role
+    
+    Role->>Target: Pre-checks (OS, hardware, disk)
+    Target-->>Role: Validation passed
+    
+    Role->>Module: Call sp_server.py (state=present)
+    Module->>Target: Create user/group (tsminst1)
+    Module->>Target: Install IBM Installation Manager
+    Module->>Target: Install SP Server packages
+    Module->>Target: Initialize server instance
+    Target-->>Module: Installation complete
+    Module-->>Role: Success
+    
+    Role->>Target: Post-checks (service, connectivity)
+    Target-->>Role: Verification passed
+    Role-->>InstallPB: Phase 1 complete
+    
+    Note over Blueprint: Phase 2: Storage Preparation
+    Blueprint->>StoragePB: Execute storage preparation
+    StoragePB->>Role: Invoke storage_prepare role
+    
+    Role->>Target: Discover disks
+    Role->>Target: Create volume groups (large)
+    Role->>Target: Create logical volumes (500+ TB)
+    Role->>Target: Create filesystems
+    Role->>Target: Mount filesystems
+    Role->>Target: Set permissions
+    Target-->>Role: Storage ready
+    Role-->>StoragePB: Phase 2 complete
+    
+    Note over Blueprint: Phase 3: Configuration
+    Blueprint->>ConfigPB: Execute configuration
+    ConfigPB->>Role: Invoke sp_server_install role
+    
+    Role->>Module: Call sp_server_configure.py
+    Module->>Target: Configure server (large settings)
+    Module->>Target: Create storage pools (petascale)
+    Module->>Target: Define policies
+    Module->>Target: Create schedules
+    Module->>Target: Tune performance parameters
+    Target-->>Module: Configuration applied
+    Module-->>Role: Success
+    
+    Role->>Target: Final validation
+    Target-->>Role: All checks passed
+    Role-->>ConfigPB: Phase 3 complete
+    
+    ConfigPB-->>Blueprint: Deployment complete
+    Blueprint-->>Admin: Petascale server ready
+```
+
+### Upgrade Workflow
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant UpgradePB as Upgrade Playbook
+    participant Role as sp_server_install Role
+    participant Module as sp_server Module
+    participant Target as Target Server
+    participant Backup as Backup Storage
+    
+    Admin->>UpgradePB: ansible-playbook sp_server_upgrade_playbook.yml
+    
+    Note over UpgradePB: Pre-Upgrade Phase
+    UpgradePB->>Role: Invoke sp_server_install role
+    Role->>Module: Call sp_server_facts.py
+    Module->>Target: Query current version
+    Target-->>Module: Version 8.1.23.0
+    Module-->>Role: Current state collected
+    
+    Role->>Target: Validate upgrade path (8.1.23 -> 8.1.27)
+    Target-->>Role: Upgrade path valid
+    
+    Role->>Target: Check disk space
+    Target-->>Role: Sufficient space available
+    
+    Role->>Module: Call sp_server.py (backup config)
+    Module->>Target: Backup server configuration
+    Target->>Backup: Save configuration files
+    Backup-->>Target: Backup complete
+    Target-->>Module: Configuration backed up
+    
+    Note over UpgradePB: Upgrade Execution Phase
+    Role->>Module: Call sp_server.py (state=upgrade)
+    Module->>Target: Stop server services
+    Target-->>Module: Services stopped
+    
+    Module->>Target: Extract upgrade packages
+    Target-->>Module: Packages extracted
+    
+    Module->>Target: Run IBM IM upgrade
+    Target-->>Module: Packages upgraded
+    
+    Module->>Target: Migrate database schema
+    Target-->>Module: Database migrated
+    
+    Module->>Target: Update configuration files
+    Target-->>Module: Configuration updated
+    
+    Module->>Target: Start server services
+    Target-->>Module: Services started
+    
+    Note over UpgradePB: Post-Upgrade Validation
+    Role->>Module: Call sp_server_facts.py
+    Module->>Target: Query new version
+    Target-->>Module: Version 8.1.27.0
+    
+    Role->>Target: Verify service status
+    Target-->>Role: All services running
+    
+    Role->>Target: Test database connectivity
+    Target-->>Role: Database accessible
+    
+    Role->>Target: Validate configuration
+    Target-->>Role: Configuration valid
+    
+    Role-->>UpgradePB: Upgrade successful
+    UpgradePB-->>Admin: Server upgraded to 8.1.27.0
+```
+
+### Uninstall Workflow
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant UninstallPB as Uninstall Playbook
+    participant Role as sp_server_install Role
+    participant Module as sp_server Module
+    participant Target as Target Server
+    participant Storage as Storage System
+    
+    Admin->>UninstallPB: ansible-playbook sp_server_uninstall_playbook.yml
+    
+    Note over UninstallPB: Pre-Uninstall Phase
+    UninstallPB->>Role: Invoke sp_server_install role
+    Role->>Module: Call sp_server_facts.py
+    Module->>Target: Query installation status
+    Target-->>Module: Server installed
+    Module-->>Role: Installation confirmed
+    
+    Role->>Admin: Confirm uninstallation (if interactive)
+    Admin-->>Role: Confirmed
+    
+    Note over UninstallPB: Backup Phase (Optional)
+    Role->>Module: Backup configuration
+    Module->>Target: Export server configuration
+    Target-->>Module: Configuration exported
+    
+    Note over UninstallPB: Uninstall Execution Phase
+    Role->>Module: Call sp_server.py (state=absent)
+    Module->>Target: Stop all server services
+    Target-->>Module: Services stopped
+    
+    Module->>Target: Halt server instance
+    Target-->>Module: Instance halted
+    
+    Module->>Target: Run IBM IM uninstall
+    Target-->>Module: Packages uninstalled
+    
+    Module->>Target: Remove installation directories
+    Target-->>Module: Directories removed
+    
+    Module->>Target: Remove user/group (optional)
+    Target-->>Module: User/group removed
+    
+    Note over UninstallPB: Storage Cleanup (Optional)
+    alt clean_up == true
+        Role->>Storage: Unmount filesystems
+        Storage-->>Role: Filesystems unmounted
+        
+        Role->>Storage: Remove logical volumes
+        Storage-->>Role: LVs removed
+        
+        Role->>Storage: Remove volume groups
+        Storage-->>Role: VGs removed
+    end
+    
+    Note over UninstallPB: Post-Uninstall Validation
+    Role->>Target: Verify services removed
+    Target-->>Role: No services found
+    
+    Role->>Target: Verify directories removed
+    Target-->>Role: Directories cleaned
+    
+    Role-->>UninstallPB: Uninstall complete
+    UninstallPB-->>Admin: Server successfully uninstalled
+```
+
+---
+
+## Data Flow Diagrams
+
+### Installation State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> PreFlight: Start Installation
+    
+    PreFlight --> Phase1: Validation Passed
+    PreFlight --> Failed: Validation Failed
+    
+    Phase1 --> InterPhase1: Install Complete
+    Phase1 --> Failed: Install Failed
+    
+    InterPhase1 --> Phase2: Validation Passed
+    InterPhase1 --> Failed: Validation Failed
+    
+    Phase2 --> InterPhase2: Storage Complete
+    Phase2 --> Failed: Storage Failed
+    
+    InterPhase2 --> Phase3: Validation Passed
+    InterPhase2 --> Failed: Validation Failed
+    
+    Phase3 --> PostFlight: Configure Complete
+    Phase3 --> Failed: Configure Failed
+    
+    PostFlight --> Success: All Checks Passed
+    PostFlight --> Failed: Checks Failed
+    
+    Success --> [*]
+    Failed --> [*]
+    
+    note right of PreFlight
+        - Validate parameters
+        - Check prerequisites
+        - Verify connectivity
+        - Hardware validation
+    end note
+    
+    note right of Phase1
+        - Create user/group
+        - Install packages
+        - Initialize instance
+        - Start services
+    end note
+    
+    note right of Phase2
+        - Discover disks
+        - Create VGs/LVs
+        - Format filesystems
+        - Mount storage
+    end note
+    
+    note right of Phase3
+        - Configure server
+        - Create pools
+        - Define policies
+        - Setup schedules
+    end note
+```
+
+---
+
+## Configuration Management
+
+### Inventory Configuration
+
+**File**: [`playbooks/inventory/petascale.ini`](../../playbooks/inventory/petascale.ini)
+
+**Structure**:
+```ini
+[sp_servers]
+sp-server-01 ansible_host=192.168.1.100 ansible_user=root
+
+[sp_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_connection=ssh
+ansible_become=yes
+
+[petascale_production]
+sp-server-01
+
+[sp_infrastructure:children]
+sp_servers
+ba_clients
+storage_agents
+operations_center
+```
+
+### Variable Management
+
+**Petascale Variables** (`playbooks/vars/petascale_vars.yml`):
+```yaml
+# Installation
+sp_server_version: "8.1.27.0"
+sp_server_state: "present"
+sp_server_bin_repo: "/data/sp-packages"
+
+# Configuration
+server_blueprint: true
+server_size: "large"
+storage_prepare_size: "large"
+
+# Security (use Ansible Vault)
+ssl_password: "{{ vault_ssl_password }}"
+dbbk_password: "{{ vault_dbbk_password }}"
+server_password: "{{ vault_server_password }}"
+admin_password: "{{ vault_admin_password }}"
+
+# Performance
+maxcap: "500G"
+dbbk_streams: "8"
+dbbk_compress: "YES"
+```
+
+---
+
+## Storage Architecture
+
+### Petascale Storage Layout
+
+```mermaid
+graph TB
+    subgraph "Physical Disks"
+        DB_Disks[Database Disks<br/>SSD/NVMe RAID 10<br/>4+ TB]
+        AL_Disks[Active Log Disks<br/>NVMe RAID 1<br/>600 GB]
+        AR_Disks[Archive Log Disks<br/>SSD RAID 5<br/>4+ TB]
+        FS_Disks[File Storage Disks<br/>HDD RAID 6<br/>500+ TB]
+        BK_Disks[Backup Disks<br/>HDD RAID 5<br/>16+ TB]
+    end
+    
+    subgraph "LVM Layer"
+        VG_DB[vg_dbspace]
+        VG_AL[vg_alog]
+        VG_AR[vg_archlog]
+        VG_FS[vg_file]
+        VG_BK[vg_backup]
+        
+        LV_DB[lv_dbspace<br/>4 TB]
+        LV_AL[lv_alog<br/>600 GB]
+        LV_AR[lv_archlog<br/>4 TB]
+        LV_FS[lv_file<br/>500 TB]
+        LV_BK[lv_backup<br/>16 TB]
+    end
+    
+    subgraph "Filesystem Layer"
+        FS_DB[/tsminst1/TSMdbspace<br/>ext4]
+        FS_AL[/tsminst1/TSMalog<br/>ext4]
+        FS_AR[/tsminst1/TSMarchlog<br/>ext4]
+        FS_FS[/tsminst1/TSMfile<br/>ext4]
+        FS_BK[/tsminst1/TSMbkup<br/>ext4]
+    end
+    
+    subgraph "SP Server"
+        DB_Engine[Database Engine]
+        Log_Manager[Log Manager]
+        Storage_Manager[Storage Manager]
+    end
+    
+    DB_Disks --> VG_DB
+    AL_Disks --> VG_AL
+    AR_Disks --> VG_AR
+    FS_Disks --> VG_FS
+    BK_Disks --> VG_BK
+    
+    VG_DB --> LV_DB
+    VG_AL --> LV_AL
+    VG_AR --> LV_AR
+    VG_FS --> LV_FS
+    VG_BK --> LV_BK
+    
+    LV_DB --> FS_DB
+    LV_AL --> FS_AL
+    LV_AR --> FS_AR
+    LV_FS --> FS_FS
+    LV_BK --> FS_BK
+    
+    FS_DB --> DB_Engine
+    FS_AL --> Log_Manager
+    FS_AR --> Log_Manager
+    FS_FS --> Storage_Manager
+    FS_BK --> Storage_Manager
+    
+    style FS_FS fill:#ff6b6b
+    style LV_FS fill:#ff6b6b
+    style VG_FS fill:#ff6b6b
+    style FS_Disks fill:#ff6b6b
+```
+
+---
+
+## Performance & Scalability
+
+### Performance Tuning Parameters
+
+**Server Parameters** (Large/Petascale):
+```sql
+UPDATE SERVER SET MAXSESSIONS=1000
+UPDATE SERVER SET MOVEBATCHSIZE=5000
+UPDATE SERVER SET EXPINTERVAL=24
+UPDATE SERVER SET TXNGROUPMAX=4096
+UPDATE SERVER SET BUFFPOOLSIZE=524288
+UPDATE SERVER SET DBMEMPERCENT=80
+```
+
+### Scalability Metrics
+
+| Metric | Target | Monitoring |
+|--------|--------|------------|
+| **Concurrent Sessions** | 1000+ | QUERY SESSION |
+| **Backup Throughput** | 10+ TB/hour | QUERY PROCESS |
+| **Database Size** | 3-4 TB | QUERY DB |
+| **Storage Utilization** | <80% | QUERY OCCUPANCY |
+| **Network Throughput** | 20+ Gbps | System monitoring |
+
+---
+
+## Security Considerations
+
+### Credential Management
+
+**Ansible Vault Usage**:
+```bash
+# Create encrypted vault file
+ansible-vault create vars/petascale_secrets.yml
+
+# Content
+vault_ssl_password: "SecureSSL@Pass123"
+vault_admin_password: "SecureAdmin@Pass456"
+vault_server_password: "SecureServer@Pass789"
+vault_dbbk_password: "SecureDBBk@Pass012"
+
+# Usage
+ansible-playbook sp_server_blueprint.yml \
+  -e @vars/large_server_vars.yml \
+  -e @vars/petascale_secrets.yml \
+  --vault-password-file vault_pass.txt
+```
+
+---
+
+## Usage Examples
+
+### Complete Petascale Deployment
+
+```bash
+# 1. Prepare inventory
+cat > playbooks/inventory/petascale.ini <<EOF
+[petascale_servers]
+petascale-sp-01 ansible_host=192.168.1.100 ansible_user=root
+
+[petascale_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_connection=ssh
+ansible_become=yes
+EOF
+
+# 2. Create petascale variables file
+cat > playbooks/vars/petascale_vars.yml <<EOF
+# Petascale Configuration
+sp_server_version: "8.1.27.0"
+sp_server_state: "present"
+server_blueprint: true
+server_size: "large"
+storage_prepare_size: "large"
+sp_server_bin_repo: "/data/sp-packages"
+target_hosts: "petascale_servers"
+
+# Petascale-specific settings
+max_sessions: 1000
+storage_capacity_tb: 500
+dbbk_streams: 8
+dbbk_compress: "YES"
+maxcap: "500G"
+
+# Instance configuration
+instance_dir: "/tsminst1"
+instance_user: "tsminst1"
+EOF
+
+# 3. Create secrets (use Ansible Vault)
+ansible-vault create playbooks/vars/petascale_secrets.yml
+# Add:
+# vault_ssl_password: "SecureSSL@Pass123"
+# vault_admin_password: "SecureAdmin@Pass456"
+# vault_server_password: "SecureServer@Pass789"
+# vault_dbbk_password: "SecureDBBk@Pass012"
+
+# 4. Deploy Petascale Solution
+ansible-playbook -i playbooks/inventory/petascale.ini \
+  playbooks/petascale_deployment_blueprint.yml \
+  -e @playbooks/vars/petascale_vars.yml \
+  -e @playbooks/vars/petascale_secrets.yml \
+  --vault-password-file vault_pass.txt
+```
+
+### Upgrade Petascale Server
+
+```bash
+# Upgrade to newer version
+ansible-playbook -i playbooks/inventory/petascale.ini \
+  playbooks/petascale_upgrade_playbook.yml \
+  -e sp_server_version="8.1.27.0" \
+  -e sp_server_bin_repo="/data/sp-packages" \
+  -e @playbooks/vars/petascale_secrets.yml \
+  --vault-password-file vault_pass.txt
+```
+
+### Uninstall Petascale Server
+
+```bash
+# Uninstall without storage cleanup
+ansible-playbook -i playbooks/inventory/petascale.ini \
+  playbooks/petascale_uninstall_playbook.yml \
+  -e clean_up=false \
+  --vault-password-file vault_pass.txt
+
+# Uninstall with complete storage cleanup (500+ TB)
+ansible-playbook -i playbooks/inventory/petascale.ini \
+  playbooks/petascale_uninstall_playbook.yml \
+  -e clean_up=true \
+  --vault-password-file vault_pass.txt
+```
+
+### Configure Petascale Server
+
+```bash
+# Apply petascale-specific configuration changes
+ansible-playbook -i playbooks/inventory/petascale.ini \
+  playbooks/petascale_configure_playbook.yml \
+  -e @playbooks/vars/petascale_vars.yml \
+  -e @playbooks/vars/petascale_secrets.yml \
+  --vault-password-file vault_pass.txt
+```
+
+### Gather Petascale Facts
+
+```bash
+# Collect petascale server information and metrics
+ansible-playbook -i playbooks/inventory/petascale.ini \
+  playbooks/petascale_facts_playbook.yml
+```
+
+---
+
+## Troubleshooting Guide
+
+### Common Issues
+
+| Issue | Cause | Resolution |
+|-------|-------|------------|
+| Insufficient disk space | Not enough disks for 500+ TB | Add more physical disks |
+| Low memory | Less than 128 GB RAM | Upgrade server memory |
+| Slow performance | Network bandwidth < 10 GbE | Upgrade network interface |
+| Installation fails | Missing prerequisites | Run pre-checks, install dependencies |
+| Storage creation fails | Disk not available | Verify disk paths with `lsblk` |
+
+### Diagnostic Commands
+
+```bash
+# Check installation status
+ansible -i inventory/petascale.ini sp_servers -m shell \
+  -a "su - tsminst1 -c 'dsmadmc -id=admin -pa=password q status'"
+
+# Check storage
+ansible -i inventory/petascale.ini sp_servers -m shell \
+  -a "df -h | grep TSM"
+
+# Check sessions
+ansible -i inventory/petascale.ini sp_servers -m shell \
+  -a "su - tsminst1 -c 'dsmadmc -id=admin -pa=password q session'"
+```
+
+---
+
+## References
+
+### Related Design Documents
+- [SP Server Design](design-sp-server.md)
+- [BA Client Design](design-ba-client.md)
+- [Storage Agent Design](design-storage-agent.md)
+- [Operations Center Design](design-oc.md)
+- [Blueprint Configuration Solution](design-sp-blueprint-conf-solution.md)
+
+### External Documentation
+- [IBM Storage Protect Documentation](https://www.ibm.com/docs/en/storage-protect/8.1.27)
+- [Ansible Documentation](https://docs.ansible.com/)
+- [Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html)
+
+### Related Files
+
+#### Playbooks (To Be Created)
+- [`playbooks/petascale_deployment_blueprint.yml`](../../playbooks/petascale_deployment_blueprint.yml) - Main orchestrator
+- [`playbooks/petascale_install_playbook.yml`](../../playbooks/petascale_install_playbook.yml) - Installation
+- [`playbooks/petascale_upgrade_playbook.yml`](../../playbooks/petascale_upgrade_playbook.yml) - Upgrade
+- [`playbooks/petascale_uninstall_playbook.yml`](../../playbooks/petascale_uninstall_playbook.yml) - Uninstall
+- [`playbooks/petascale_configure_playbook.yml`](../../playbooks/petascale_configure_playbook.yml) - Configuration
+- [`playbooks/petascale_storage_prepare_playbook.yml`](../../playbooks/petascale_storage_prepare_playbook.yml) - Storage preparation
+- [`playbooks/petascale_facts_playbook.yml`](../../playbooks/petascale_facts_playbook.yml) - Facts gathering
+
+#### Roles (To Be Created)
+- [`roles/petascale_server_install/`](../../roles/petascale_server_install/)
+- [`roles/petascale_storage_prepare/`](../../roles/petascale_storage_prepare/)
+- [`roles/petascale_server_facts/`](../../roles/petascale_server_facts/)
+
+#### Modules (To Be Created)
+- [`plugins/modules/petascale_server.py`](../../plugins/modules/petascale_server.py)
+- [`plugins/modules/petascale_server_configure.py`](../../plugins/modules/petascale_server_configure.py)
+- [`plugins/modules/petascale_server_facts.py`](../../plugins/modules/petascale_server_facts.py)
+
+#### Module Utilities (To Be Created)
+- [`plugins/module_utils/petascale_server_utils.py`](../../plugins/module_utils/petascale_server_utils.py)
+- [`plugins/module_utils/petascale_storage_utils.py`](../../plugins/module_utils/petascale_storage_utils.py)
+
+#### Variables and Inventory (To Be Created)
+- [`playbooks/vars/petascale_vars.yml`](../../playbooks/vars/petascale_vars.yml)
+- [`playbooks/inventory/petascale.ini`](../../playbooks/inventory/petascale.ini)
+
+#### Documentation (To Be Created)
+- [`docs/guides/petascale-deployment-guide.md`](../../docs/guides/petascale-deployment-guide.md)
+- [`docs/guides/petascale-operations-guide.md`](../../docs/guides/petascale-operations-guide.md)
+- [`docs/guides/petascale-troubleshooting-guide.md`](../../docs/guides/petascale-troubleshooting-guide.md)
+
+---
+
+## Implementation Roadmap
+
+### Phase 1: Core Infrastructure (Priority: High)
+
+**Playbooks to Create:**
+1. `playbooks/petascale_deployment_blueprint.yml` - Main orchestrator (3-phase deployment)
+2. `playbooks/petascale_install_playbook.yml` - Installation playbook (large server config)
+3. `playbooks/petascale_storage_prepare_playbook.yml` - Storage preparation (500+ TB)
+
+**Roles to Create:**
+1. `roles/petascale_server_install/` - Complete role with all tasks and templates
+2. `roles/petascale_storage_prepare/` - Storage preparation role
+
+**Modules to Create:**
+1. `plugins/modules/petascale_server.py` - Core server module
+2. `plugins/module_utils/petascale_server_utils.py` - Utility functions
+
+### Phase 2: Lifecycle Management (Priority: High)
+
+**Playbooks to Create:**
+1. `playbooks/petascale_upgrade_playbook.yml` - Upgrade playbook
+2. `playbooks/petascale_uninstall_playbook.yml` - Uninstall playbook
+3. `playbooks/petascale_configure_playbook.yml` - Configuration playbook
+
+**Modules to Create:**
+1. `plugins/modules/petascale_server_configure.py` - Configuration module
+2. `plugins/module_utils/petascale_storage_utils.py` - Storage utilities
+
+### Phase 3: Monitoring and Operations (Priority: Medium)
+
+**Roles to Create:**
+1. `roles/petascale_server_facts/` - Facts gathering role
+
+**Modules to Create:**
+1. `plugins/modules/petascale_server_facts.py` - Facts module
+
+### Phase 4: Documentation (Priority: Medium)
+
+**Guides to Create:**
+1. `docs/guides/petascale-deployment-guide.md` - Step-by-step deployment guide
+2. `docs/guides/petascale-operations-guide.md` - Operations and maintenance guide
+3. `docs/guides/petascale-troubleshooting-guide.md` - Troubleshooting guide
+
+### Phase 5: Configuration and Testing (Priority: Low)
+
+**Configuration Files to Create:**
+1. `playbooks/vars/petascale_vars.yml` - Variable definitions
+2. `playbooks/inventory/petascale.ini` - Inventory template
+3. `tests/integration/targets/petascale/` - Integration tests
+
+---
+
+## File Structure Summary
+
+```
+ansible-ibm-storage-protect/
+├── playbooks/
+│   ├── petascale_deployment_blueprint.yml      # NEW: Main orchestrator
+│   ├── petascale_install_playbook.yml          # NEW: Installation
+│   ├── petascale_upgrade_playbook.yml          # NEW: Upgrade
+│   ├── petascale_uninstall_playbook.yml        # NEW: Uninstall
+│   ├── petascale_configure_playbook.yml        # NEW: Configuration
+│   ├── petascale_storage_prepare_playbook.yml  # NEW: Storage prep
+│   ├── petascale_facts_playbook.yml            # NEW: Facts gathering
+│   ├── inventory/
+│   │   └── petascale.ini                       # NEW: Petascale inventory
+│   └── vars/
+│       └── petascale_vars.yml                  # NEW: Petascale variables
+├── roles/
+│   ├── petascale_server_install/               # NEW: Installation role
+│   │   ├── defaults/main.yml
+│   │   ├── tasks/
+│   │   │   ├── main.yml
+│   │   │   ├── petascale_prechecks_linux.yml
+│   │   │   ├── petascale_install_linux.yml
+│   │   │   ├── petascale_configuration_linux.yml
+│   │   │   ├── petascale_postchecks_linux.yml
+│   │   │   └── petascale_uninstall_linux.yml
+│   │   └── templates/
+│   │       ├── petascale_install_response.xml.j2
+│   │       ├── petascale_basics.j2
+│   │       ├── petascale_policy.j2
+│   │       └── petascale_schedules.j2
+│   ├── petascale_storage_prepare/              # NEW: Storage role
+│   │   ├── defaults/main.yml
+│   │   └── tasks/
+│   │       ├── main.yml
+│   │       ├── petascale_storage_prepare_linux.yml
+│   │       └── petascale_storage_cleanup_linux.yml
+│   └── petascale_server_facts/                 # NEW: Facts role
+│       ├── defaults/main.yml
+│       └── tasks/
+│           └── main.yml
+├── plugins/
+│   ├── modules/
+│   │   ├── petascale_server.py                 # NEW: Server module
+│   │   ├── petascale_server_configure.py       # NEW: Configure module
+│   │   └── petascale_server_facts.py           # NEW: Facts module
+│   └── module_utils/
+│       ├── petascale_server_utils.py           # NEW: Server utilities
+│       └── petascale_storage_utils.py          # NEW: Storage utilities
+├── docs/
+│   ├── design/
+│   │   └── design-peta-scale.md                # THIS DOCUMENT
+│   └── guides/
+│       ├── petascale-deployment-guide.md       # NEW: Deployment guide
+│       ├── petascale-operations-guide.md       # NEW: Operations guide
+│       └── petascale-troubleshooting-guide.md  # NEW: Troubleshooting
+└── tests/
+    └── integration/
+        └── targets/
+            └── petascale/                       # NEW: Integration tests
+                ├── test_petascale_install.yml
+                ├── test_petascale_upgrade.yml
+                └── test_petascale_uninstall.yml
+```
+
+---
+
+**Document Version**: 1.0
+**Last Updated**: 2026-04-01
+**Author**: IBM Storage Protect Ansible Team
+**Status**: Active - Design Phase
+
+**Note**: This is a design document. All file paths marked as "NEW" or "To Be Created" represent files that will be implemented in future development phases according to the implementation roadmap above.

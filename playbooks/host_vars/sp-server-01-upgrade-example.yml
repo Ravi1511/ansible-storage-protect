@@ -1,0 +1,206 @@
+---
+# ============================================================================
+# EXAMPLE: SP Server Upgrade Configuration for sp-server-01
+# ============================================================================
+#
+# This is an EXAMPLE configuration file showing how to configure an SP Server
+# for upgrade from version 8.1.24.0 to 8.2.2.000
+#
+# USAGE:
+# 1. Copy this file to: playbooks/host_vars/sp-server-01.yml
+# 2. Modify the versions and paths to match your environment
+# 3. Ensure the new version package is available on the remote node
+# 4. Run: ansible-playbook playbooks/petascale_upgrade.yml \
+#         -i playbooks/inventory/petascale.ini \
+#         -e "confirm_upgrade=yes"
+#
+# ============================================================================
+
+# ============================================================================
+# SP Server Upgrade Settings
+# ============================================================================
+
+# Target version to upgrade to
+# IMPORTANT: This must be HIGHER than the currently installed version
+# The playbook will detect the current version and prevent downgrade
+sp_server_version: "8.2.2.000"
+
+# Installation state - MUST be "upgrade" for upgrade operations
+sp_server_state: "upgrade"
+
+# Installation action - MUST be "upgrade" for upgrade operations
+sp_server_action: "upgrade"
+
+# ============================================================================
+# Package Location
+# ============================================================================
+
+# Path to the NEW version package repository ON REMOTE NODE
+# This should contain the upgrade package file
+# Example: 8.2.2.000-IBM-SPSRV-LIC-LinuxX86_64-109.bin
+sp_server_bin_repo: "/tmp"
+
+# ============================================================================
+# Installation Directories
+# ============================================================================
+
+# Directory for SP Server installation binaries
+sp_server_install_dest: "/opt/sp_server_binary/"
+
+# Directory for SP Server upgrade binaries
+# This is where upgrade files will be staged
+sp_server_upgrade_dest: "/opt/sp_server_upgrade_binary"
+
+# DB2 instance path (usually doesn't change during upgrade)
+db2_instance_path: "/opt/tivoli/tsm/db2/instance"
+
+# ============================================================================
+# Server Configuration (Preserved During Upgrade)
+# ============================================================================
+
+# Server name (must match existing installation)
+server_name: "PETASCALE-SP01"
+
+# Server password (must match existing installation)
+server_password: "IBMSPServer@@123456789"
+
+# Admin user credentials (must match existing installation)
+admin_name: "admin"
+admin_password: "admin@@123456789"
+
+# ============================================================================
+# Server Sizing (Preserved During Upgrade)
+# ============================================================================
+
+# Server size: xsmall, small, medium, large
+server_size: "medium"
+
+# ============================================================================
+# TSM User Configuration (Preserved During Upgrade)
+# ============================================================================
+
+# TSM group
+tsm_group: "tsmusers"
+tsm_group_gid: "10001"
+
+# TSM user
+tsm_user: "tsminst1"
+tsm_user_uid: "10001"
+tsm_user_password: "Tsmuser@@123456789"
+
+# ============================================================================
+# SSL Configuration (Preserved During Upgrade)
+# ============================================================================
+
+# Secure port
+secure_port: "9443"
+
+# SSL password
+ssl_password: "YourSSLPassword@@123"
+ssl_password_confirm: "{{ ssl_password }}"
+
+# ============================================================================
+# Component Selection (Preserved During Upgrade)
+# ============================================================================
+
+# Components to upgrade
+offerings:
+  server: true          # SP Server (required)
+  stagent: true         # Storage Agent
+  devices: true         # Device drivers
+  oc: true              # Operations Center
+  ossm: true            # OSSM
+
+# ============================================================================
+# Database Configuration (Preserved During Upgrade)
+# ============================================================================
+
+# Database directories (existing directories will be preserved)
+directories:
+  - TSMdbspace01
+  - TSMdbspace02
+  - TSMdbspace03
+  - TSMdbspace04
+  - TSMalog
+  - TSMarchlog
+
+# ============================================================================
+# Backup Configuration (Preserved During Upgrade)
+# ============================================================================
+
+# Database backup settings
+backup_start_time: "12:00"
+backup_start_time_string: "12PM"
+backup_start_plus_fourteen: "14:00"
+backup_start_plus_ten: "10:00"
+
+# Maximum capacity
+maxcap: "100G"
+
+# Database backup streams
+dbbk_streams: "4"
+
+# Database backup compression
+dbbk_compress: "YES"
+
+# Database backup password
+dbbk_password: "YourDBkPassword@@123456789"
+
+# ============================================================================
+# License Configuration (Preserved During Upgrade)
+# ============================================================================
+
+# License value
+license_value: "tsm"
+
+# License option
+license_option: "A"
+
+# ============================================================================
+# Advanced Settings
+# ============================================================================
+
+# Profile ID
+profile_id: "IBM Storage Protect"
+
+# Installation location
+install_location: "/opt/IBM/InstallationManager/eclipse"
+
+# Installation Manager command line path
+imcl_path: "/opt/IBM/InstallationManager/eclipse/tools/imcl"
+
+# Server blueprint mode
+server_blueprint: false
+
+# Compatible architectures
+sp_server_compatible_architectures:
+  - x86_64
+
+# ============================================================================
+# UPGRADE CHECKLIST
+# ============================================================================
+#
+# Before running the upgrade:
+# ☐ Backup your SP Server database
+# ☐ Backup configuration files
+# ☐ Verify new version package is on remote node at sp_server_bin_repo
+# ☐ Ensure sufficient disk space for upgrade
+# ☐ Review IBM release notes for the target version
+# ☐ Test upgrade in non-production environment first
+# ☐ Plan for potential downtime
+# ☐ Notify users of scheduled maintenance
+#
+# To run the upgrade:
+#   ansible-playbook playbooks/petascale_upgrade.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_upgrade=yes"
+#
+# To upgrade only this host:
+#   ansible-playbook playbooks/petascale_upgrade.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_upgrade=yes" \
+#     --limit sp-server-01
+#
+# ============================================================================
+
+# Made with Bob

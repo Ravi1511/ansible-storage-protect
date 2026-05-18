@@ -20,28 +20,28 @@
         msg: sp_server_temp_dest
 
     - name: Install required packages on remote VMs
-      ansible.builtin.package:
-        name:
-          - rsync
-          - lsof
-        state: present
+      ansible.builtin.shell: |
+        dnf install -y rsync lsof 2>&1 || echo "Packages may already be installed"
+      register: package_install_result
+      changed_when: "'Nothing to do' not in package_install_result.stdout and 'already installed' not in package_install_result.stdout"
+      become: true
 
-    # Transfer binary to the remote machines
-    - name: Transferring the binary to the remote host
-      ansible.builtin.synchronize:
+    # Binary is already on remote node, just copy it to the temp directory
+    - name: Copy binary from remote location to temp directory
+      ansible.builtin.copy:
         src: "{{ sp_server_binary_file_path }}"
-        dest: "{{ sp_server_temp_dest }}"
-        mode: push
+        dest: "{{ sp_server_temp_dest }}/{{ sp_server_binary_file_path | basename }}"
+        remote_src: yes
+        mode: "0755"
       register: copy_result
 
-
-    # Validate file transfer and show error details
-    - name: Validating binary transfer
+    # Validate file copy
+    - name: Validating binary copy
       ansible.builtin.fail:
         msg: >
-          Binary transfer to the remote host failed.
-          Error details: {{ copy_result.stderr | default('No error details available.') }}
-      when: not copy_result is defined
+          Binary copy on remote host failed.
+          Error details: {{ copy_result.msg | default('No error details available.') }}
+      when: copy_result.failed | default(false)
 
     # Ensure the binary is executable
     - name: Ensure binary is executable
@@ -63,6 +63,7 @@
       args:
         chdir: "{{ sp_server_temp_dest }}"
       register: sp_server_binary_status
+      become: true
 
     # Execute install.sh with the generated response.xml
     - name: Execute install.sh with response.xml
@@ -70,6 +71,7 @@
       args:
         chdir: "{{ sp_server_temp_dest }}"
       register: sp_server_installation_result
+      become: true
 
     - name: Verfiy Installation of sp server
       ansible.builtin.include_tasks: sp_server_postchecks_linux.yml
@@ -107,8 +109,10 @@
           become: true
           ansible.builtin.command:
             cmd: /opt/IBM/InstallationManager/eclipse/tools/imcl uninstall {{ item }}
-          loop: "{{ sp_server_installed_components }}"
-          when: sp_server_installed_components | length > 0
+          loop: "{{ sp_server_installed_components | default([]) }}"
+          when:
+            - sp_server_installed_components is defined
+            - sp_server_installed_components | length > 0
 
         - name: Debug failure message
           ansible.builtin.debug:
