@@ -33,14 +33,24 @@
     src: /opt/tivoli/tsm/client/hsm/bin/dsm.opt
     dest: /opt/tivoli/tsm/client/hsm/bin/dsm.opt.bk
     remote_src: true
-  ignore_errors: true
+  register: backup_opt_upgrade
+  failed_when: false
+
+- name: Display dsm.opt backup status
+  ansible.builtin.debug:
+    msg: "ℹ️  Configuration file dsm.opt {{ 'backed up successfully' if backup_opt_upgrade.changed else 'not found (skipped)' }}"
 
 - name: Backup dsm.sys configuration file
   ansible.builtin.copy:
     src: /opt/tivoli/tsm/client/hsm/bin/dsm.sys
     dest: /opt/tivoli/tsm/client/hsm/bin/dsm.sys.bk
     remote_src: true
-  ignore_errors: true
+  register: backup_sys_upgrade
+  failed_when: false
+
+- name: Display dsm.sys backup status
+  ansible.builtin.debug:
+    msg: "ℹ️  Configuration file dsm.sys {{ 'backed up successfully' if backup_sys_upgrade.changed else 'not found (skipped)' }}"
 
 - name: Display backup completion
   ansible.builtin.debug:

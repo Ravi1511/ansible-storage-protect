@@ -73,15 +73,39 @@ ba_client_start_daemon: false
 
 ## Common Variables for SP Servers
 
+### Package Location (Choose One Method)
+
+**RECOMMENDED: Explicit Package Path**
+```yaml
+sp_server_package_path: "/tmp/8.2.2.000-IBM-SPSRV-LinuxX86_64.bin"
+```
+- Eliminates ambiguity when multiple packages exist
+- Consistent with BA Client approach
+- Clear error messages if file not found
+
+**LEGACY: Pattern Matching**
+```yaml
+sp_server_version: "8.2.2.000"
+sp_server_bin_repo: "/tmp"
+```
+- Searches for files matching `{{ sp_server_version }}*.bin`
+- May match multiple files (uses first match)
+- Kept for backward compatibility
+
+### All SP Server Variables
+
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `sp_server_version` | Yes | SP Server version | `"8.2.2.000"` |
+| `sp_server_package_path` | Recommended | Explicit path to binary file | `"/tmp/8.2.2.000-IBM-SPSRV-LinuxX86_64.bin"` |
+| `sp_server_version` | Yes* | SP Server version | `"8.2.2.000"` |
+| `sp_server_bin_repo` | Yes* | Package directory (legacy) | `"/tmp"` |
 | `sp_server_state` | Yes | Install, uninstall, or upgrade | `"present"`, `"absent"`, or `"upgrade"` |
 | `sp_server_action` | Yes | Action to perform | `"install"` or `"upgrade"` |
-| `sp_server_bin_repo` | Yes | Package location on remote node | `"/tmp"` |
 | `sp_server_install_dest` | No | Installation directory | `"/opt/sp_server_binary/"` (default) |
 | `sp_server_upgrade_dest` | No | Upgrade staging directory | `"/opt/sp_server_upgrade_binary"` (default) |
 | `server_name` | Yes | Server name | `"PETASCALE-SP01"` |
+
+*Required only if `sp_server_package_path` is not defined
 
 ## Upgrade Configuration
 
@@ -94,11 +118,20 @@ To configure a host for upgrade, you need to:
 
 ### SP Server Upgrade Example
 
+**Recommended (Explicit Path):**
+```yaml
+sp_server_version: "8.2.2.000"                                    # Target version (must be higher)
+sp_server_state: "upgrade"                                        # State must be "upgrade"
+sp_server_action: "upgrade"                                       # Action must be "upgrade"
+sp_server_package_path: "/tmp/8.2.2.000-IBM-SPSRV-LinuxX86_64.bin"  # Exact package path
+```
+
+**Legacy (Pattern Matching):**
 ```yaml
 sp_server_version: "8.2.2.000"      # Target version (must be higher)
 sp_server_state: "upgrade"          # State must be "upgrade"
 sp_server_action: "upgrade"         # Action must be "upgrade"
-sp_server_bin_repo: "/tmp"          # Location of new version package
+sp_server_bin_repo: "/tmp"          # Directory containing package
 ```
 
 ### BA Client Upgrade Example

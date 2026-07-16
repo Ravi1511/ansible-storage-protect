@@ -49,6 +49,23 @@
         path: "{{ sp_server_temp_dest }}/{{ sp_server_binary_file_path | basename }}"
         mode: "0755"
 
+    # Detect existing SP Server instances to prevent update errors
+    - name: Detect existing SP Server instances
+      ansible.builtin.shell: |
+        if [ -d "/opt/tivoli/tsm/server/bin" ]; then
+          find /opt/tivoli/tsm -maxdepth 1 -type d -name "tsm*" -o -name "*inst*" 2>/dev/null | xargs -I {} basename {} 2>/dev/null || true
+        fi
+      register: existing_instances_result
+      changed_when: false
+      failed_when: false
+
+    - name: Set existing instances fact
+      ansible.builtin.set_fact:
+        existing_sp_instances: "{{ existing_instances_result.stdout_lines | default([]) }}"
+
+    - name: Display detected instances
+      ansible.builtin.debug:
+        msg: "Detected existing instances: {{ existing_sp_instances | default([]) }}"
 
     # Generate response.xml for installation
     - name: Generate response.xml
@@ -100,10 +117,11 @@
         - name: Checking for installed packages
           ansible.builtin.include_tasks: sp_server_postchecks_linux.yml
 
-        - name: Delete the created directories and remove binaries
-          ansible.builtin.file:
-            path: "{{ sp_server_temp_dest }}"
-            state: absent
+        # Temporarily commented to examine response.xml
+        # - name: Delete the created directories and remove binaries
+        #   ansible.builtin.file:
+        #     path: "{{ sp_server_temp_dest }}"
+        #     state: absent
 
         - name: Execute command for each installed package
           become: true

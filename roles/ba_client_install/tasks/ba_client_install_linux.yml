@@ -3,7 +3,7 @@
 - name: Check if BA Client is already installed
   ansible.builtin.command: rpm -q TIVsm-BA
   register: ba_client_check
-  ignore_errors: true
+  failed_when: false
   changed_when: false
 
 # Displaying the installation status ( if ba client is installed and still users passes the ba_client_action as install, playbook will terminate )
@@ -19,24 +19,41 @@
 
 # ================= Pre-checks ==========================
 
+# Collect system information for compatibility checks
+- name: Collect system architecture
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all'
+      - '!min'
+      - hardware
+
+- name: Get disk space for root filesystem
+  ansible.builtin.shell: df / | tail -1 | awk '{print $4}'
+  register: root_disk_space_kb
+  changed_when: false
+
+- name: Set disk space in MB
+  ansible.builtin.set_fact:
+    root_disk_space_mb: "{{ (root_disk_space_kb.stdout | int / 1024) | int }}"
+
 # System Compatibility checks for installing the ba client ( Pre-checks )
 - name: Checking architecture compatibility
   ansible.builtin.set_fact:
-    architecture_compatible: "{{ (system_info.Architecture | first) in sp_server_compatible_architectures }}"
-
-#- name: Checking Java installation
-#  ansible.builtin.set_fact:
-#    java_installed: "{{ system_info['Java Version'] | lower is search('jdk|version') }}"
+    architecture_compatible: "{{ ansible_architecture in sp_server_compatible_architectures }}"
 
 - name: Checking available disk space
   ansible.builtin.set_fact:
-    avail_disk_space: "{{ disk_space.available_mb | int > 1500 }}"
+    avail_disk_space: "{{ root_disk_space_mb | int > 1500 }}"
 
 - name: Compatibility results
   ansible.builtin.debug:
     msg: |
       Architecture check: {{ architecture_compatible }}
-      Disk Space: {{ avail_disk_space }}
+      System architecture: {{ ansible_architecture }}
+      Compatible architectures: {{ sp_server_compatible_architectures }}
+      Disk Space check: {{ avail_disk_space }}
+      Available disk space: {{ root_disk_space_mb }} MB
+      Required disk space: > 1500 MB
 
 - name: Compatibility check result
   ansible.builtin.debug:
@@ -50,12 +67,33 @@
 
 - name: Fail if system is incompatible
   ansible.builtin.fail:
-    msg: >
-      System compatibility checks failed. Please ensure the following
-      requirements are met: - Compatible architecture: x86_64 - Java installed -
-      Sufficient disk space: > 1400 MB Architecture check: {{
-      architecture_compatible }} Disk
-      Space: {{ avail_disk_space }}
+    msg: |
+      ============================================================
+      System Compatibility Check Failed
+      ============================================================
+      
+      ERROR: System does not meet BA Client installation requirements.
+      
+      Architecture Check: {{ 'PASS' if architecture_compatible else 'FAIL' }}
+        System architecture: {{ ansible_architecture }}
+        Compatible architectures: {{ sp_server_compatible_architectures }}
+      
+      Disk Space Check: {{ 'PASS' if avail_disk_space else 'FAIL' }}
+        Available disk space: {{ root_disk_space_mb }} MB
+        Required disk space: > 1500 MB
+      
+      ACTION REQUIRED:
+      {% if not architecture_compatible %}
+      - System architecture {{ ansible_architecture }} is not supported
+      - Supported architectures: {{ sp_server_compatible_architectures | join(', ') }}
+      {% endif %}
+      {% if not avail_disk_space %}
+      - Insufficient disk space on root filesystem
+      - Available: {{ root_disk_space_mb }} MB
+      - Required: > 1500 MB
+      - Free up disk space or use a different filesystem
+      {% endif %}
+      ============================================================
   when: not (architecture_compatible and avail_disk_space)
 
 #- name: Install rsync on remote VMs

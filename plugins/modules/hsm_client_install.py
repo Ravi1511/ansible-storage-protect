@@ -35,16 +35,17 @@ except ImportError:
 DOCUMENTATION = '''
 ---
 module: hsm_client_install
-short_description: Install, upgrade or remove IBM Storage Protect HSM Client on Linux, Windows, and AIX hosts
+short_description: Install or remove IBM Storage Protect HSM Client on Linux and AIX hosts
 version_added: "1.0.0"
 author: IBM Storage Protect Team
 
 description:
   - This module provides idempotent management of the HSM Client software on target hosts.
-  - Supports Linux, Windows, and AIX platforms with platform-specific installation methods.
-  - It supports installation, upgrade, and uninstallation operations.
+  - Supports Linux and AIX platforms with platform-specific installation methods.
+  - It supports installation and uninstallation operations only (no in-place upgrades).
+  - For upgrades, uninstall the current version first, then install the new version.
   - The module handles package dependencies, configuration, and rollback on failures.
-  - For Linux/AIX uses RPM packages, for Windows uses MSI installer.
+  - Uses RPM packages for Linux and installp for AIX.
 
 options:
   state:
@@ -109,17 +110,30 @@ EXAMPLES = '''
     package_source: "/tmp/8.1.25.0-TIV-TSMHSM-LinuxX86.tar"
     install_path: "/opt/tivoli/tsm/client/hsm/bin"
 
-- name: Upgrade HSM Client to newer version
+- name: Install HSM Client on AIX
   hsm_client_install:
-    hsm_client_version: "8.1.26.0"
+    hsm_client_version: "8.1.25.0"
     state: present
-    package_source: "/tmp/8.1.26.0-TIV-TSMHSM-LinuxX86.tar"
+    package_source: "/tmp/8.1.25.0-TIV-TSMHSM-AIX.tar.Z"
 
 - name: Uninstall HSM Client
   hsm_client_install:
     hsm_client_version: "8.1.25.0"
     state: absent
     package_source: "/tmp/8.1.25.0-TIV-TSMHSM-LinuxX86.tar"
+
+- name: Upgrade HSM Client (two-step process)
+  # Step 1: Uninstall old version
+  hsm_client_install:
+    hsm_client_version: "8.1.25.0"
+    state: absent
+    package_source: "/tmp/8.1.25.0-TIV-TSMHSM-LinuxX86.tar"
+  
+  # Step 2: Install new version
+  hsm_client_install:
+    hsm_client_version: "8.1.26.0"
+    state: present
+    package_source: "/tmp/8.1.26.0-TIV-TSMHSM-LinuxX86.tar"
 '''
 
 RETURN = '''
@@ -258,6 +272,15 @@ def main():
                 msg="HSM Client not installed, nothing to remove"
             )
         
+        # Version mismatch check - fail if trying to uninstall a different version
+        if hsm_client_version and installed_version and hsm_client_version != installed_version and not force:
+            module.fail_json(
+                changed=False,
+                msg=f"Version mismatch: Installed version is {installed_version}, but requested uninstall version is {hsm_client_version}. "
+                    f"To uninstall the currently installed version, use -e 'hsm_client_version={installed_version}'. "
+                    f"To force uninstall regardless of version, add -e 'force=true'."
+            )
+        
         try:
             uninstalled = utils.uninstall_hsm_client()
             if uninstalled:
@@ -284,11 +307,18 @@ def main():
     utils.log(f"Version available (file_exists): {version_available}")
     utils.log(f"Package source: {package_source}")
     
-    # Determine action
+    # Determine action - Simplified: only install or none (no upgrade support)
     if not installed and version_available:
         action = "install"
-    elif installed and user_version_list > installed_version_list and version_available:
-        action = "upgrade"
+    elif installed:
+        # If already installed, fail with message to uninstall first
+        module.fail_json(
+            msg=f"HSM Client version {installed_version} is already installed. "
+                f"This module does not support in-place upgrades. "
+                f"To install version {hsm_client_version}, please: "
+                f"1. Run uninstall playbook first (state=absent) "
+                f"2. Then run install playbook with new version (state=present)"
+        )
     else:
         action = "none"
     
@@ -337,24 +367,6 @@ def main():
             module.exit_json(
                 changed=False,
                 msg=f"Installation failed and rollback executed: {install_error}. {rollback_status}"
-            )
-    
-    elif action == 'upgrade':
-        try:
-            upgrade_result = utils.upgrade_hsm_client(
-                package_source,
-                install_path,
-                hsm_client_version,
-                state,
-                temp_dir
-            )
-            module.exit_json(**upgrade_result)
-        except Exception as upgrade_error:
-            module.warn(f"Upgrade failed: {upgrade_error}")
-            utils.rollback(action="upgrade", previous_version=installed_version)
-            module.exit_json(
-                changed=False,
-                msg=f"Upgrade failed and rollback executed: {upgrade_error}"
             )
     
     elif state == 'absent':

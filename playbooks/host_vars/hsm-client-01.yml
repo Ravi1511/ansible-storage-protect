@@ -13,7 +13,7 @@
 
 # HSM Client version to install
 # Must match the package file available on the remote node
-hsm_client_version: "8.2.1.0"
+hsm_client_version: "8.2.2.0"
 
 # Operating system type for package selection
 # Options: LinuxX86, LinuxX86_64, LinuxS390X, LinuxPPC64LE
@@ -26,8 +26,13 @@ os_type: "LinuxX86"
 
 # Full path to the HSM Client installation package on THIS remote node
 # The package must exist at this location before running the playbook
-# Format: <version>-TIV-TSMHSM-<os_type>.tar
-hsm_client_package_path: "/tmp/8.2.1.0-TIV-TSMHSM-LinuxX86.tar"
+# Format for AIX: <version>-TIV-TSMHSM-AIXGPFS.tar.Z (compressed)
+# Format for Linux: <version>-TIV-TSMHSM-<os_type>.tar (uncompressed)
+hsm_client_package_path: "/tmp/8.2.2.0-TIV-TSMHSM-LinuxX86.tar"
+
+# Location of the tar file
+# Options: "remote" (file is on target host), "controller" (file is on Ansible controller)
+tar_file_location: "remote"
 
 # Alternative: If package is in a different location
 # hsm_client_package_path: "/opt/software/8.2.1.0-TIV-TSMHSM-LinuxX86.tar"

@@ -88,13 +88,47 @@
 #     --check
 #
 # ============================================================================
+# ============================================================================
+# Detect OS and Set Python Interpreter Path
+# ============================================================================
+- name: Detect OS and set Python interpreter
+  hosts: all
+  gather_facts: false
+  become: false
+  tags:
+    - always
+  
+  tasks:
+    - name: Detect operating system
+      raw: uname -s
+      register: os_detection
+      changed_when: false
+      failed_when: false
+    
+    - name: Set Python interpreter path based on OS
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: >-
+          {% if 'AIX' in os_detection.stdout %}
+          /opt/freeware/bin/python3.9
+          {% else %}
+          /usr/bin/python3.9
+          {% endif %}
+    
+    - name: Display detected OS and Python path
+      ansible.builtin.debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          OS: {{ 'AIX' if 'AIX' in os_detection.stdout else 'Linux' }}
+          Python interpreter: {{ ansible_python_interpreter }}
+
 
 # ============================================================================
 # Display Warning and Confirmation
 # ============================================================================
 - name: Display uninstall warning
-  hosts: localhost
+  hosts: all
   gather_facts: false
+  run_once: true
   
   tasks:
     - name: Display critical warning message
@@ -167,7 +201,13 @@
   
   tasks:
     - name: Check if Python 3.9 is installed
-      raw: python3.9 --version
+      ansible.builtin.shell: |
+        for path in python3.9 /usr/bin/python3.9 /opt/freeware/bin/python3.9 /usr/local/bin/python3.9; do
+          if command -v $path >/dev/null 2>&1 || [ -x "$path" ]; then
+            $path --version 2>&1 && exit 0
+          fi
+        done
+        exit 1
       register: python39_check
       failed_when: false
       changed_when: false
@@ -343,12 +383,25 @@
           OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}
           ============================================================
     
-    - name: Check if HSM Client is currently installed
+    - name: Check if HSM Client is currently installed (Linux)
       ansible.builtin.command: rpm -q TIVsm-HSM
-      register: hsm_client_check
+      register: hsm_client_check_linux
       ignore_errors: true
       changed_when: false
       failed_when: false
+      when: ansible_os_family != 'AIX'
+    
+    - name: Check if HSM Client is currently installed (AIX)
+      ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
+      register: hsm_client_check_aix
+      ignore_errors: true
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == 'AIX'
+    
+    - name: Set unified check result
+      ansible.builtin.set_fact:
+        hsm_client_check: "{{ hsm_client_check_linux if ansible_os_family != 'AIX' else hsm_client_check_aix }}"
     
     - name: Display HSM Client current status
       ansible.builtin.debug:

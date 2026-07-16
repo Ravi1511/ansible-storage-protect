@@ -7,7 +7,7 @@
   when: detected_os == "Linux"
 
 - name: Query the installed version of TIVsm-HSM (AIX)
-  ansible.builtin.command: lslpp -l TIVsm.client.hsm
+  ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
   register: installed_version_check_aix
   ignore_errors: true
   changed_when: false
@@ -29,7 +29,7 @@
 
 - name: Debug the installed version
   ansible.builtin.debug:
-    var: installed_version
+    msg: "Installed version: {{ installed_version | default('Not installed') }}"
 
 - name: Normalize the user version and installed version
   ansible.builtin.set_fact:

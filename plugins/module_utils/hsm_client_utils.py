@@ -202,7 +202,8 @@ class HSMClientHelper:
                     self.module.warn(f"lslpp command failed: {err.strip()}")
                     return False, None
             else:
-                # Linux: Use rpm to check for TIVsm-HSM
+                # Linux: Check for any TIVsm package (HSM, BA, or API64)
+                # Try HSM first
                 cmd = "rpm -q TIVsm-HSM"
                 rc, out, err = self.run_cmd(cmd, check_rc=False)
                 
@@ -213,10 +214,33 @@ class HSMClientHelper:
                     rpm_no_arch = rpm_full.split(".x86_64")[0].split(".s390x")[0].split(".ppc64le")[0]
                     version = rpm_no_arch.replace("-", ".")
                     return True, version
-                elif rc == 1:
-                    return False, None
-                else:
-                    self.module.fail_json(msg=f"Command failed: {cmd}\nError: {err.strip()}")
+                
+                # Try BA Client
+                cmd = "rpm -q TIVsm-BA"
+                rc, out, err = self.run_cmd(cmd, check_rc=False)
+                
+                if rc == 0 and "TIVsm-BA" in out:
+                    # Parse version from RPM output
+                    # Example: TIVsm-BA-8.2.2-0.x86_64
+                    rpm_full = out.strip().replace("TIVsm-BA-", "")
+                    rpm_no_arch = rpm_full.split(".x86_64")[0].split(".s390x")[0].split(".ppc64le")[0]
+                    version = rpm_no_arch.replace("-", ".")
+                    return True, version
+                
+                # Try API64
+                cmd = "rpm -q TIVsm-API64"
+                rc, out, err = self.run_cmd(cmd, check_rc=False)
+                
+                if rc == 0 and "TIVsm-API64" in out:
+                    # Parse version from RPM output
+                    # Example: TIVsm-API64-8.2.2-0.x86_64
+                    rpm_full = out.strip().replace("TIVsm-API64-", "")
+                    rpm_no_arch = rpm_full.split(".x86_64")[0].split(".s390x")[0].split(".ppc64le")[0]
+                    version = rpm_no_arch.replace("-", ".")
+                    return True, version
+                
+                # Nothing found
+                return False, None
     
     def verify_system_prereqs(self, check_gpfs=True):
         """
@@ -470,64 +494,6 @@ class HSMClientHelper:
             self.module.warn(f"HSM status check failed (may not be configured yet): {err}")
             return None
     
-    def deactivate_hsm(self):
-        """Deactivate HSM before upgrade - CRITICAL for data safety"""
-        self.module.warn("Deactivating HSM (CRITICAL for upgrade safety)...")
-        
-        # Check for active migrations first
-        self.module.warn("Checking for active migrations...")
-        status = self.check_hsm_status()
-        
-        # Wait for any active migrations to complete
-        wait_cmd = self.hsm_commands['wait']
-        self.module.warn("Waiting for active migrations to complete...")
-        rc, out, err = self.run_cmd(wait_cmd, use_unsafe_shell=True, check_rc=False)
-        
-        # Global deactivate
-        deactivate_cmd = self.hsm_commands['global_deactivate']
-        rc, out, err = self.run_cmd(deactivate_cmd, use_unsafe_shell=True, check_rc=False)
-        
-        if rc != 0:
-            self.module.warn(f"HSM deactivation failed: {err}")
-            # Try force deactivation as last resort
-            self.module.warn("Attempting force deactivation...")
-            force_cmd = f"{deactivate_cmd} -force"
-            rc, out, err = self.run_cmd(force_cmd, use_unsafe_shell=True, check_rc=False)
-            
-            if rc != 0:
-                self.module.fail_json(msg=f"HSM force deactivation failed: {err}")
-        
-        # Disable failover
-        disable_failover_cmd = self.hsm_commands['disable_failover']
-        rc, out, err = self.run_cmd(disable_failover_cmd, use_unsafe_shell=True, check_rc=False)
-        
-        # Verify deactivation
-        status = self.check_hsm_status()
-        self.module.warn("HSM deactivated successfully")
-        
-        return True
-    
-    def reactivate_hsm(self):
-        """Reactivate HSM after upgrade"""
-        self.module.warn("Reactivating HSM...")
-        
-        # Global reactivate
-        reactivate_cmd = self.hsm_commands['global_reactivate']
-        rc, out, err = self.run_cmd(reactivate_cmd, use_unsafe_shell=True, check_rc=False)
-        
-        if rc != 0:
-            self.module.warn(f"HSM reactivation failed: {err}")
-            return False
-        
-        # Enable failover
-        enable_failover_cmd = self.hsm_commands['enable_failover']
-        rc, out, err = self.run_cmd(enable_failover_cmd, use_unsafe_shell=True, check_rc=False)
-        
-        # Verify reactivation
-        status = self.check_hsm_status()
-        self.module.warn("HSM reactivated successfully")
-        
-        return True
     
     def verify_client_version(self):
         """Verify client version using dsmc query session"""
@@ -1132,7 +1098,8 @@ class HSMClientHelper:
             ]
             stop_service_cmd = "/etc/rc.gpfshsm stop"
         else:  # Linux
-            check_cmd = "rpm -q TIVsm-HSM"
+            # Check for any TIVsm package (HSM, BA, or API64)
+            check_cmd = "rpm -qa 'TIVsm*'"
             uninstall_order = [
                 "TIVsm-WEBGUI",
                 "TIVsm-HSM",
@@ -1145,10 +1112,10 @@ class HSMClientHelper:
             ]
             stop_service_cmd = "systemctl stop dsmhsm"
         
-        # Check if HSM Client is installed
+        # Check if any TIVsm packages are installed
         rc, out, err = self.run_cmd(check_cmd, check_rc=False)
-        if rc != 0:
-            self.log("HSM Client is not installed on this system. Skipping uninstallation.")
+        if rc != 0 or not out.strip():
+            self.log("No TIVsm packages found on this system. Skipping uninstallation.")
             return False
         
         # Stop daemon (platform-specific)
@@ -1208,113 +1175,4 @@ class HSMClientHelper:
         self.module.warn(f"HSM Client successfully uninstalled on {platform_name} with all components removed.")
         return True
     
-    def upgrade_hsm_client(self, package_source, install_path, hsm_client_version, state, temp_dir):
-        """
-        Upgrade HSM Client to specified version.
-        CRITICAL: Includes HSM deactivation before and reactivation after upgrade.
-        """
-        installed, installed_version = self.check_installed()
-        if not installed:
-            self.module.fail_json(msg="HSM Client not installed. Please install instead of upgrade.")
-        
-        self.log(f"Upgrading HSM Client from {installed_version} -> {hsm_client_version}")
-        
-        # CRITICAL: Check GPFS status before upgrade (Linux/AIX only)
-        if not self.is_windows():
-            gpfs_status = self.check_gpfs_status()
-            if not gpfs_status:
-                self.module.warn("GPFS is not running. HSM operations may not be available.")
-            
-            # CRITICAL: Deactivate HSM before upgrade to prevent data loss
-            try:
-                self.deactivate_hsm()
-            except Exception as e:
-                self.module.warn(f"HSM deactivation failed (may not be configured): {e}")
-        
-        backup_dir = os.path.join(temp_dir, "backup_old_rpms")
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        # Backup currently installed HSM Client rpms
-        if not self.is_windows():
-            cmd = "rpm -qa 'TIVsm*' 'gsk*' --queryformat '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n'"
-            rc, out, err = self.run_cmd(cmd, check_rc=False)
-            
-            for pkg in out.strip().splitlines():
-                self.run_cmd(f"cp {package_source}/{pkg}*.rpm {backup_dir}/", check_rc=False)
-            
-            self.module.warn(f"Backed up existing rpms to {backup_dir}")
-        
-        # Backup configuration files
-        if self.is_windows():
-            config_files = [
-                r"C:\Program Files\Tivoli\tsm\client\hsm\bin\dsm.opt",
-                r"C:\Program Files\Tivoli\tsm\client\hsm\bin\dsm.sys"
-            ]
-        else:
-            config_files = [
-                "/opt/tivoli/tsm/client/hsm/bin/dsm.opt",
-                "/opt/tivoli/tsm/client/hsm/bin/dsm.sys"
-            ]
-        for config_file in config_files:
-            if os.path.exists(config_file):
-                backup_file = f"{config_file}.upgrade_bk"
-                shutil.copy2(config_file, backup_file)
-                self.module.warn(f"Backed up {config_file}")
-        
-        try:
-            # Uninstall current version
-            self.uninstall_hsm_client()
-            
-            # Install new version
-            self.install_hsm_client(package_source, install_path, temp_dir)
-            
-            # Restore configuration files
-            for config_file in config_files:
-                backup_file = f"{config_file}.upgrade_bk"
-                if os.path.exists(backup_file):
-                    shutil.copy2(backup_file, config_file)
-                    self.module.warn(f"Restored {config_file}")
-                    os.remove(backup_file)
-            
-            self.configure_hsm_client()
-            self.post_installation_verification(hsm_client_version, state)
-            self.start_hsm_daemon(hsm_client_start_daemon=True)
-            
-            # CRITICAL: Reactivate HSM after successful upgrade (Linux/AIX only)
-            if not self.is_windows():
-                try:
-                    self.reactivate_hsm()
-                except Exception as e:
-                    self.module.warn(f"HSM reactivation failed: {e}")
-            
-            # Verify upgrade
-            post_installed, post_version = self.check_installed()
-            if not post_installed or post_version != hsm_client_version:
-                if (IS_WINDOWS):
-                    print("Upgrade failed: version mismatch after installation")
-                else:
-                    self.module.fail_json(msg="Upgrade failed: version mismatch after installation")
-            
-            # Test connectivity
-            self.test_server_connectivity()
-            self.verify_client_version()
-            
-            self.log(f"HSM Client successfully upgraded from {installed_version} to {post_version}")
-            return {
-                "changed": True,
-                "msg": f"HSM Client successfully upgraded from {installed_version} to {post_version}",
-                "previous_version": installed_version,
-                "new_version": post_version
-            }
-            
-        except Exception as upgrade_error:
-            self.module.warn(f"Upgrade failed: {upgrade_error}")
-            # Attempt to reactivate HSM even on failure (Linux/AIX only)
-            if not self.is_windows():
-                try:
-                    self.reactivate_hsm()
-                except:
-                    pass
-            raise
-
 

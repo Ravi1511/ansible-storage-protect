@@ -10,7 +10,7 @@
 
 # SP Server version to install
 # Must match the package file available on the remote node
-sp_server_version: "8.2.2.000"
+sp_server_version: "8.1.27.000"
 
 # Installation state
 # Options: present (install), absent (uninstall), upgrade
@@ -24,10 +24,16 @@ sp_server_action: "install"
 # Package Location
 # ============================================================================
 
-# Path to SP Server installation package repository ON REMOTE NODE
-# This should point to the directory containing the SP Server installation files
-# Binary file: 8.2.2.000-IBM-SPSRV-LIC-DEBUG-Linuxx86_64-109.bin
-sp_server_bin_repo: "/tmp"
+# RECOMMENDED: Explicit package path (like BA Client)
+# Specify the exact path to the SP Server binary file on the remote node
+# This eliminates ambiguity when multiple packages exist in the same directory
+sp_server_package_path: "/tmp/8.1.27.000-IBM-SPSRV-LIC-Linuxx86_64-162.bin"
+
+# LEGACY: Pattern matching approach (kept for backward compatibility)
+# If sp_server_package_path is not defined, the system will search for files
+# matching the pattern: {{ sp_server_version }}*.bin in sp_server_bin_repo
+# sp_server_bin_repo: "/tmp"
+# sp_server_version: "8.2.2.000"
 
 # ============================================================================
 # Installation Directories

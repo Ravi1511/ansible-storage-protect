@@ -46,7 +46,12 @@
 # USAGE EXAMPLES
 # ============================================================================
 #
-# Basic execution:
+# IMPORTANT: SP Server installation requires the --tags install flag
+#
+# Install ALL components (BA Client + HSM Client + SP Server):
+#   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini --tags install
+#
+# Install ONLY BA Client and HSM Client (skip SP Server):
 #   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini
 #
 # With custom variables file:
@@ -74,6 +79,8 @@
 - name: Set global variables
   hosts: localhost
   gather_facts: false
+  tags:
+    - always
   
   tasks:
     - name: Display configuration source information
@@ -104,78 +111,62 @@
       delegate_facts: true
 
 # ============================================================================
-# Check Python 3.9 presence on all nodes
+# Detect OS and Set Python Interpreter Path
 # ============================================================================
-- name: Check Python 3.9 presence on all nodes
+- name: Detect OS and set Python interpreter
   hosts: all
   gather_facts: false
   become: false
-  any_errors_fatal: true  
+  tags:
+    - always
   
   tasks:
-    - name: Check if Python 3.9 is installed
-      raw: python3.9 --version
-      register: python39_check
-      failed_when: false
+    - name: Detect operating system
+      raw: uname -s
+      register: os_detection
       changed_when: false
-
-    - name: Report Python 3.9 presence
-      ansible.builtin.debug:
-        msg: >-
-          {% if python39_check.rc == 0 %}
-            Python 3.9 is PRESENT on {{ inventory_hostname }} - Version: {{ python39_check.stdout }}
+      failed_when: false
+    
+    - name: Set Python interpreter path based on OS
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: >-
+          {% if 'AIX' in os_detection.stdout %}
+          /opt/freeware/bin/python3.9
           {% else %}
-            Python 3.9 is ABSENT on {{ inventory_hostname }}
+          /usr/bin/python3.9
           {% endif %}
     
-    - name: Set Python 3.9 status fact
-      ansible.builtin.set_fact:
-        python39_present: "{{ python39_check.rc == 0 }}"
-        python39_version: "{{ python39_check.stdout if python39_check.rc == 0 else 'Not installed' }}"
-    
-    - name: Summary - Python 3.9 status
+    - name: Display detected OS and Python path
       ansible.builtin.debug:
-        msg:
-          - "Host: {{ inventory_hostname }}"
-          - "Python 3.9 Present: {{ python39_present }}"
-          - "Version: {{ python39_version }}"
+        msg: |
+          Host: {{ inventory_hostname }}
+          OS: {{ 'AIX' if 'AIX' in os_detection.stdout else 'Linux' }}
+          Python interpreter: {{ ansible_python_interpreter }}
 
-    - name: Collect missing hosts
-      ansible.builtin.set_fact:
-        missing_hosts: "{{ (missing_hosts | default([])) + [inventory_hostname] }}"
-      when: not python39_present
-
-    - name: Final Summary
-      run_once: true
-      ansible.builtin.debug:
-        msg: >-
-          {% set missing = [] %}
-          {% for host in groups['all'] %}
-          {%   if not hostvars[host].python39_present %}
-          {%     set _ = missing.append(host) %}
-          {%   endif %}
-          {% endfor %}
-          {% if missing | length > 0 %}
-          Python 3.9 is MISSING on: {{ missing | join(', ') }}
-          {% else %}
-          Python 3.9 is present on ALL hosts
-          {% endif %}
-
-    - name: Stop playbook if Python 3.9 is missing
-      ansible.builtin.assert:
-        that:
-          - groups['all'] | map('extract', hostvars, 'python39_present') | select('equalto', false) | list | length == 0
-        fail_msg: >-
-          Please install Python 3.9 on the following hosts and re-run the playbook:
-          {%- set missing = [] -%}
-          {%- for host in groups['all'] -%}
-            {%- if hostvars[host].python39_present is defined and not hostvars[host].python39_present -%}
-              {%- set _ = missing.append(host) -%}
-            {%- endif -%}
-          {%- endfor %}
-          {{ missing | join(', ') }}
-      run_once: true
-      delegate_to: localhost
+# ============================================================================
+# System Dependencies Validation
+# ============================================================================
+# Validates all required dependencies: Python 3.9+, Java, lsof, rsync, /tmp config
+# Provides detailed remediation report if dependencies are missing
+# Optionally installs dependencies with: -e "install_dependencies=true"
+- name: Validate system dependencies on all nodes
+  hosts: all
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  tags:
+    - always
+  
+  roles:
+    - role: ../roles/system_dependencies_check
+      vars:
+        # Validation only by default (no auto-install)
+        # To enable auto-install: -e "install_dependencies=true"
+        install_dependencies: "{{ install_dependencies_flag | default(false) }}"
+        # Changed to false: Report missing dependencies but don't fail
+        # Installation will proceed with warnings
+        fail_on_missing_dependencies: false
+        generate_remediation_report: true
 
 # ============================================================================
 # Check Required Software Packages on Remote Nodes
@@ -184,6 +175,8 @@
   hosts: all
   gather_facts: false
   become: false
+  tags:
+    - always
   
   # Variables loaded from:
   # - playbooks/group_vars/all.yml (defaults)
@@ -194,8 +187,8 @@
       ansible.builtin.set_fact:
         required_packages: >-
           {%- set packages = [] -%}
-          {%- if 'server' in group_names -%}
-            {%- set server_version = software_version | replace('.0', '.000') -%}
+          {%- if 'sp_servers' in group_names -%}
+            {%- set server_version = sp_server_version | default(software_version) -%}
             {%- set _ = packages.append({
                 'type': 'SP Server',
                 'identifier': 'SPSRV',
@@ -203,17 +196,19 @@
               }) -%}
           {%- endif -%}
           {%- if 'ba_clients' in group_names -%}
+            {%- set ba_version = ba_client_version | default(software_version) -%}
             {%- set _ = packages.append({
                 'type': 'BA Client',
                 'identifier': 'TSMBAC',
-                'search_pattern': software_version + '*TSMBAC*.tar'
+                'search_pattern': ba_version + '*TSMBAC*.tar'
               }) -%}
           {%- endif -%}
           {%- if 'hsm_clients' in group_names -%}
+            {%- set hsm_version = hsm_client_version | default(software_version) -%}
             {%- set _ = packages.append({
                 'type': 'HSM Client',
                 'identifier': 'TSMHSM',
-                'search_pattern': software_version + '*TSMHSM*.tar'
+                'search_pattern': hsm_version + '*TSMHSM*.tar*'
               }) -%}
           {%- endif -%}
           {{ packages }}
@@ -299,7 +294,7 @@
       ansible.builtin.debug:
         msg: |
           {% if required_packages | length == 0 %}
-          Node {{ inventory_hostname }} is not in any software installation group (server, ba_clients, hsm_clients)
+          Node {{ inventory_hostname }} is not in any software installation group (sp_servers, ba_clients, hsm_clients)
           {% elif all_packages_present %}
           ✓ All required packages are PRESENT on {{ inventory_hostname }}:
           {% for pkg in found_packages %}
@@ -326,6 +321,8 @@
   hosts: all
   gather_facts: false
   become: false
+  tags:
+    - always
   
   tasks:
     - name: Generate missing packages report
@@ -423,13 +420,15 @@
         | length > 0
 
 # ============================================================================
-# BA Client Installation on BA Client Nodes (FIRST)
+# SP Server Installation on SP Server Nodes (FIRST)
 # ============================================================================
-# Installation Order: 1st BA Client, 2nd HSM Client, 3rd SP Server
-- name: Install BA Client on ba_clients nodes
+# Installation Order: 1st SP Server, 2nd HSM Client, 3rd BA Client
+- name: Install SP Server on sp_servers nodes
   hosts: sp_servers
   gather_facts: true
   become: true
+  tags:
+    - always
   
   # Variables are loaded from:
   # - playbooks/host_vars/<hostname>.yml (per-host settings)
@@ -502,7 +501,7 @@
         msg: >-
           {% if not sp_server_needs_install %}
             SP Server was already installed - No action taken
-          {% elif sp_server_verify.rc == 0 and 'com.ibm.storage.protect.server' in sp_server_verify.stdout %}
+          {% elif sp_server_verify.rc == 0 and 'com.tivoli.dsm.server' in sp_server_verify.stdout %}
             ✓ SP Server successfully installed on {{ inventory_hostname }}
           {% else %}
             ✗ SP Server installation may have failed on {{ inventory_hostname }}
@@ -513,7 +512,7 @@
         sp_server_status: >-
           {% if not sp_server_needs_install %}
             already_installed
-          {% elif sp_server_verify.rc == 0 and 'com.ibm.storage.protect.server' in sp_server_verify.stdout %}
+          {% elif sp_server_verify.rc == 0 and 'com.tivoli.dsm.server' in sp_server_verify.stdout %}
             newly_installed
           {% else %}
             installation_failed
@@ -525,6 +524,8 @@
 - name: SP Server Installation Summary
   hosts: sp_servers
   gather_facts: false
+  tags:
+    - always
   
   tasks:
     - name: Generate installation summary report
@@ -580,11 +581,13 @@
 # ============================================================================
 # HSM Client Installation on HSM Client Nodes (SECOND)
 # ============================================================================
-# Installation Order: 1st BA Client, 2nd HSM Client, 3rd SP Server
+# Installation Order: 1st SP Server, 2nd HSM Client, 3rd BA Client
 - name: Install HSM Client on hsm_clients nodes
   hosts: hsm_clients
   gather_facts: true
   become: true
+  tags:
+    - always
   
   # ============================================================================
   # HSM Client Configuration
@@ -629,12 +632,25 @@
       ansible.builtin.debug:
         msg: "Starting HSM Client installation check and setup on {{ inventory_hostname }}"
     
-    - name: Check if HSM Client is already installed
+    - name: Check if HSM Client is already installed (Linux)
       ansible.builtin.command: rpm -q TIVsm-HSM
-      register: hsm_client_check
+      register: hsm_client_check_linux
       ignore_errors: true
       changed_when: false
       failed_when: false
+      when: ansible_os_family != 'AIX'
+    
+    - name: Check if HSM Client is already installed (AIX)
+      ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
+      register: hsm_client_check_aix
+      ignore_errors: true
+      changed_when: false
+      failed_when: false
+      when: ansible_os_family == 'AIX'
+    
+    - name: Set unified check result
+      ansible.builtin.set_fact:
+        hsm_client_check: "{{ hsm_client_check_linux if ansible_os_family != 'AIX' else hsm_client_check_aix }}"
     
     - name: Display HSM Client current status
       ansible.builtin.debug:
@@ -703,16 +719,34 @@
         seconds: 5
       when: hsm_client_needs_install
     
-    - name: Verify HSM Client installation after role execution
+    - name: Verify HSM Client installation after role execution (Linux)
       ansible.builtin.command: rpm -q TIVsm-HSM
-      register: hsm_client_verify
-      ignore_errors: true
+      register: hsm_client_verify_linux
       changed_when: false
       failed_when: false
-      when: hsm_client_needs_install
+      when:
+        - hsm_client_needs_install
+        - ansible_os_family != 'AIX'
       retries: 3
       delay: 2
-      until: hsm_client_verify.rc == 0
+      until: hsm_client_verify_linux.rc == 0
+
+    - name: Verify HSM Client installation after role execution (AIX)
+      ansible.builtin.command: lslpp -l tivoli.tsm.client.hsm.gpfs
+      register: hsm_client_verify_aix
+      changed_when: false
+      failed_when: false
+      when:
+        - hsm_client_needs_install
+        - ansible_os_family == 'AIX'
+      retries: 3
+      delay: 2
+      until: hsm_client_verify_aix.rc == 0
+
+    - name: Set unified verification result
+      ansible.builtin.set_fact:
+        hsm_client_verify: "{{ hsm_client_verify_linux if ansible_os_family != 'AIX' else hsm_client_verify_aix }}"
+      when: hsm_client_needs_install
     
     - name: Display HSM Client installation result
       ansible.builtin.debug:
@@ -740,6 +774,8 @@
   hosts: hsm_clients
   gather_facts: false
   become: false
+  tags:
+    - always
   
   tasks:
     - name: Generate installation summary report
@@ -793,18 +829,35 @@
         | length > 0
 
 # ============================================================================
-# SP Server Installation on SP Server Nodes (THIRD)
+# BA Client Installation on BA Client Nodes (THIRD)
 # ============================================================================
-# Installation Order: 1st BA Client, 2nd HSM Client, 3rd SP Server
-- name: Install SP Server on sp_servers nodes
-  hosts: sp_servers
+# Installation Order: 1st SP Server, 2nd HSM Client, 3rd BA Client
+- name: Install BA Client on ba_clients nodes
+  hosts: ba_clients
   gather_facts: true
   become: true
+  tags:
+    - always
   
-  # Variables are loaded from:
-  # - playbooks/host_vars/<hostname>.yml (per-host settings)
-  # - playbooks/group_vars/sp_servers.yml (group defaults)
-  # - playbooks/group_vars/all.yml (global defaults)
+  # ============================================================================
+  # BA Client Configuration
+  # ============================================================================
+  # Variables are loaded from (in order of precedence):
+  # 1. playbooks/host_vars/<hostname>.yml (HIGHEST - per-host settings)
+  # 2. playbooks/group_vars/ba_clients.yml (group defaults)
+  # 3. playbooks/group_vars/all.yml (global defaults)
+  #
+  # CUSTOMER: Edit the host_vars files to customize each BA client:
+  # - playbooks/host_vars/ba-client-01.yml (version 8.2.1.0 example)
+  # - playbooks/host_vars/ba-client-02.yml (version 8.1.24.0 example)
+  # - playbooks/host_vars/ba-client-03.yml (custom paths example)
+  #
+  # Each host can have:
+  # - Different BA Client versions
+  # - Different package locations
+  # - Different installation directories
+  # - Different daemon start settings
+  # ============================================================================
   
   tasks:
     - name: Display BA Client configuration for this host
@@ -855,7 +908,9 @@
       ansible.builtin.stat:
         path: "{{ ba_client_package_path }}"
       register: package_stat
-      when: ba_client_needs_install
+      when:
+        - ba_client_needs_install
+        - ba_client_package_path is defined
     
     - name: Display package availability status
       ansible.builtin.debug:
@@ -944,6 +999,8 @@
   hosts: ba_clients
   gather_facts: false
   become: false
+  tags:
+    - always
   
   tasks:
     - name: Generate installation summary report

@@ -273,33 +273,113 @@
         - not (sp_server_version_list > installed_sp_version_list)
 
 
-- name: Finding SP Server binary on remote node
-  ansible.builtin.find:
-    paths: "{{ sp_server_bin_repo }}"
-    patterns: "{{ sp_server_version }}*.bin"
-  register: file_status
-  when: sp_server_individual_component_name is not defined
+# ============================================================================
+# Package Location - Support both explicit path and pattern matching
+# ============================================================================
 
-- name: Find SP Server binary when individual component is specified
-  ansible.builtin.find:
-    paths: "{{ sp_server_bin_repo }}/{{ sp_server_individual_component_name }}"
-    patterns: "{{ sp_server_version }}*.bin"
-  register: file_status
-  when: sp_server_individual_component_name is defined
+# Option 1: Check if explicit package path is provided (recommended, like BA Client)
+- name: Check if explicit SP Server package path is provided
+  ansible.builtin.stat:
+    path: "{{ sp_server_package_path }}"
+  register: explicit_package_check
+  when: sp_server_package_path is defined
 
-
-- name: Fail if the binary does not exist
-  ansible.builtin.fail:
-    msg: >
-        The binary file for {{ sp_server_version }}*.bin does not exist in the directory {{ sp_server_bin_repo }} on {{ inventory_hostname }}.
-        Verify the availability of binary in the specified directory and ensure the correct path is specified.
-  when: file_status.matched == 0
-
-- name: Storing the found binary file path
+- name: Use explicit package path if provided and exists
   ansible.builtin.set_fact:
-    sp_server_binary_file_path: "{{ file_status.files[0].path }}"
-  when: file_status.matched > 0
-  delegate_to: localhost
+    sp_server_binary_file_path: "{{ sp_server_package_path }}"
+    package_discovery_method: "explicit_path"
+  when:
+    - sp_server_package_path is defined
+    - explicit_package_check.stat.exists
+
+- name: Fail if explicit package path provided but file not found
+  ansible.builtin.fail:
+    msg: |
+      ============================================================
+      SP Server Package Not Found
+      ============================================================
+      
+      ERROR: The specified SP Server package does not exist.
+      
+      Specified path: {{ sp_server_package_path }}
+      Host: {{ inventory_hostname }}
+      
+      Please verify:
+      1. The file exists on the remote host
+      2. The path is correct
+      3. You have read permissions
+      
+      To check on the remote host:
+        ls -la {{ sp_server_package_path }}
+      ============================================================
+  when:
+    - sp_server_package_path is defined
+    - not explicit_package_check.stat.exists
+
+# Option 2: Fall back to pattern matching if explicit path not provided (legacy method)
+- name: Finding SP Server binary using pattern matching (fallback)
+  when: sp_server_package_path is not defined
+  block:
+    - name: Finding SP Server binary on remote node
+      ansible.builtin.find:
+        paths: "{{ sp_server_bin_repo }}"
+        patterns: "{{ sp_server_version }}*.bin"
+      register: file_status
+      when: sp_server_individual_component_name is not defined
+
+    - name: Find SP Server binary when individual component is specified
+      ansible.builtin.find:
+        paths: "{{ sp_server_bin_repo }}/{{ sp_server_individual_component_name }}"
+        patterns: "{{ sp_server_version }}*.bin"
+      register: file_status
+      when: sp_server_individual_component_name is defined
+
+    - name: Fail if the binary does not exist
+      ansible.builtin.fail:
+        msg: |
+          ============================================================
+          SP Server Package Not Found (Pattern Matching)
+          ============================================================
+          
+          ERROR: No SP Server binary found matching the pattern.
+          
+          Search pattern: {{ sp_server_version }}*.bin
+          Search directory: {{ sp_server_bin_repo }}
+          Host: {{ inventory_hostname }}
+          
+          Please verify:
+          1. The binary file exists in the specified directory
+          2. The version number is correct
+          3. The file name matches the pattern
+          
+          To check on the remote host:
+            ls -la {{ sp_server_bin_repo }}/{{ sp_server_version }}*.bin
+          
+          TIP: For better control, use explicit package path instead:
+            sp_server_package_path: "/tmp/8.1.27.000-IBM-SPSRV-LinuxX86_64.bin"
+          ============================================================
+      when: file_status.matched == 0
+
+    - name: Warn if multiple binaries found
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Multiple SP Server binaries found matching pattern {{ sp_server_version }}*.bin
+          Using first match: {{ file_status.files[0].path }}
+          
+          All matches found:
+          {% for file in file_status.files %}
+            - {{ file.path }}
+          {% endfor %}
+          
+          RECOMMENDATION: Use explicit package path to avoid ambiguity:
+            sp_server_package_path: "{{ file_status.files[0].path }}"
+      when: file_status.matched > 1
+
+    - name: Storing the found binary file path
+      ansible.builtin.set_fact:
+        sp_server_binary_file_path: "{{ file_status.files[0].path }}"
+        package_discovery_method: "pattern_matching"
+      when: file_status.matched > 0
 
 - name: Debug the binary path
   debug:
@@ -308,33 +388,40 @@
 - name: Debug binary path
   debug:
     msg: sp_server_binary_file_path
-# System info gathering commented out to avoid role path issues
-# The compatibility checks below will still work without it
-# - name: Gathering system info for compatibility checks
-#   ansible.builtin.include_role:
-#     name: system_info
-
-- name: Collect basic system facts for compatibility checks
+# Collect system information for compatibility checks
+- name: Collect system architecture
   ansible.builtin.setup:
     gather_subset:
       - '!all'
       - '!min'
-      - architecture
-      - distribution
+      - hardware
+
+- name: Get disk space for root filesystem
+  ansible.builtin.shell: df / | tail -1 | awk '{print $4}'
+  register: root_disk_space_kb
+  changed_when: false
+
+- name: Set disk space in MB
+  ansible.builtin.set_fact:
+    root_disk_space_mb: "{{ (root_disk_space_kb.stdout | int / 1024) | int }}"
 
 - name: Checking architecture compatibility
   ansible.builtin.set_fact:
-    architecture_compatible: "{{ (system_info.Architecture | first) in sp_server_compatible_architectures }}"
+    architecture_compatible: "{{ ansible_architecture in sp_server_compatible_architectures }}"
 
 - name: Checking available disk space
   ansible.builtin.set_fact:
-    avail_disk_space: "{{ disk_space.available_mb | int > 7500 }}"
+    avail_disk_space: "{{ root_disk_space_mb | int > 7500 }}"
 
 - name: Compatibility results
   ansible.builtin.debug:
     msg: |
       Architecture check: {{ architecture_compatible }}
-      Disk Space: {{ avail_disk_space }}
+      System architecture: {{ ansible_architecture }}
+      Compatible architectures: {{ sp_server_compatible_architectures }}
+      Disk Space check: {{ avail_disk_space }}
+      Available disk space: {{ root_disk_space_mb }} MB
+      Required disk space: > 7500 MB
 
 - name: Compatibility check result
   ansible.builtin.debug:
@@ -348,13 +435,33 @@
 
 - name: Fail if system is incompatible
   ansible.builtin.fail:
-    msg: >
-      System compatibility checks failed. Please ensure the following
-      requirements are met: 
-      - Compatible architectures: {{ sp_server_compatible_architectures }}
-      - Sufficient disk space: > 7500 MB 
-      Architecture Found: {{ architecture_compatible }} 
-      Current Available Disk Space: {{ avail_disk_space }}
+    msg: |
+      ============================================================
+      System Compatibility Check Failed
+      ============================================================
+      
+      ERROR: System does not meet SP Server installation requirements.
+      
+      Architecture Check: {{ 'PASS' if architecture_compatible else 'FAIL' }}
+        System architecture: {{ ansible_architecture }}
+        Compatible architectures: {{ sp_server_compatible_architectures }}
+      
+      Disk Space Check: {{ 'PASS' if avail_disk_space else 'FAIL' }}
+        Available disk space: {{ root_disk_space_mb }} MB
+        Required disk space: > 7500 MB
+      
+      ACTION REQUIRED:
+      {% if not architecture_compatible %}
+      - System architecture {{ ansible_architecture }} is not supported
+      - Supported architectures: {{ sp_server_compatible_architectures | join(', ') }}
+      {% endif %}
+      {% if not avail_disk_space %}
+      - Insufficient disk space on root filesystem
+      - Available: {{ root_disk_space_mb }} MB
+      - Required: > 7500 MB
+      - Free up disk space or use a different filesystem
+      {% endif %}
+      ============================================================
   when: not (architecture_compatible and avail_disk_space)
 
 - name: Set the directory for installation

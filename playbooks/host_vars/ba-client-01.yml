@@ -10,7 +10,7 @@
 
 # BA Client version to install
 # Must match the package file available on the remote node
-ba_client_version: "8.2.1.0"
+ba_client_version: "8.1.27.0"
 
 # Operating system type for package selection
 # Options: LinuxX86, LinuxX86_64, LinuxS390X, LinuxPPC64LE
@@ -23,7 +23,7 @@ os_type: "LinuxX86"
 # Full path to the BA Client installation package on THIS remote node
 # The package must exist at this location before running the playbook
 # Format: <version>-TIV-TSMBAC-<os_type>.tar
-ba_client_package_path: "/tmp/8.2.1.0-TIV-TSMBAC-LinuxX86.tar"
+ba_client_package_path: "/tmp/8.1.27.0-TIV-TSMBAC-LinuxX86.tar "
 
 # Alternative: If package is in a different location
 # ba_client_package_path: "/opt/software/8.2.1.0-TIV-TSMBAC-LinuxX86.tar"
@@ -77,5 +77,3 @@ sp_server_compatible_architectures:
 # Additional installation options (uncomment if needed)
 # ba_client_install_options: ""
 # ba_client_config_file: "/opt/tivoli/tsm/client/ba/bin/dsm.opt"
-
-# Made with Bob

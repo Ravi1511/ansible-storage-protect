@@ -27,7 +27,7 @@
 
 - name: Display GPFS base package status
   ansible.builtin.debug:
-    msg: "{{ 'GPFS base is installed: ' + gpfs_base_check.stdout_lines[0] if gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0 else 'WARNING: GPFS base package is NOT installed.' }}"
+    msg: "{{ 'GPFS base package detected: ' + gpfs_base_check.stdout_lines[0] if gpfs_base_check is defined and gpfs_base_check.rc is defined and gpfs_base_check.rc == 0 else 'Note: GPFS base package not found via rpm/lslpp (will verify via mmgetstate)' }}"
 
 - name: Check for additional GPFS packages (Linux)
   ansible.builtin.shell: rpm -qa | grep -i '^gpfs\.'
