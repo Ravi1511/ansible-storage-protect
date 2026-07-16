@@ -4,48 +4,48 @@
   register: memory_info
   ignore_errors: true
   changed_when: false
-  when: ansible_os_family != "AIX"
+  when: ansible_facts['os_family'] != "AIX"
 
 - name: Get Memory Information (AIX)
   ansible.builtin.command: svmon -G
   register: memory_info_aix
   ignore_errors: true
   changed_when: false
-  when: ansible_os_family == "AIX"
+  when: ansible_facts['os_family'] == "AIX"
 
 - name: Show Memory Information
   ansible.builtin.debug:
     var: memory_info.stdout
-  when: memory_info is defined and ansible_os_family != "AIX"
+  when: memory_info is defined and ansible_facts['os_family'] != "AIX"
 
 - name: Show Memory Information (AIX)
   ansible.builtin.debug:
     var: memory_info_aix.stdout
-  when: memory_info_aix is defined and ansible_os_family == "AIX"
+  when: memory_info_aix is defined and ansible_facts['os_family'] == "AIX"
 
 - name: Collect Architecture Information (Linux)
   ansible.builtin.command: lscpu
   register: lscpu_output
   changed_when: false
   ignore_errors: true
-  when: ansible_os_family != "AIX"
+  when: ansible_facts['os_family'] != "AIX"
 
 - name: Collect Architecture Information (AIX)
   ansible.builtin.command: uname -p
   register: uname_output
   changed_when: false
   ignore_errors: true
-  when: ansible_os_family == "AIX"
+  when: ansible_facts['os_family'] == "AIX"
 
 - name: Extract Architecture Info (Linux)
   ansible.builtin.set_fact:
     architecture: "{{ lscpu_output.stdout | regex_search('Architecture:\\s+(\\S+)', '\\1') }}"
-  when: ansible_os_family != "AIX" and lscpu_output.rc == 0
+  when: ansible_facts['os_family'] != "AIX" and lscpu_output.rc == 0
 
 - name: Extract Architecture Info (AIX)
   ansible.builtin.set_fact:
     architecture: "{{ uname_output.stdout | trim }}"
-  when: ansible_os_family == "AIX" and uname_output.rc == 0
+  when: ansible_facts['os_family'] == "AIX" and uname_output.rc == 0
 
 - name: Set default architecture if not detected
   ansible.builtin.set_fact:
@@ -90,14 +90,14 @@
   register: disk_info
   changed_when: false
   ignore_errors: true
-  when: ansible_os_family != "AIX"
+  when: ansible_facts['os_family'] != "AIX"
 
 - name: Collect Disk Space Information for /opt (AIX)
   ansible.builtin.command: df -g /opt
   register: disk_info_aix
   changed_when: false
   ignore_errors: true
-  when: ansible_os_family == "AIX"
+  when: ansible_facts['os_family'] == "AIX"
 
 - name: Parse Disk Space Information for /opt (Linux)
   ansible.builtin.set_fact:
@@ -108,7 +108,7 @@
       available_mb: "{{ disk_info.stdout.splitlines()[1].split()[3] | regex_replace('M', '') | int }}"
       use_percent: "{{ disk_info.stdout.splitlines()[1].split()[4] }}"
       mount_point: "{{ disk_info.stdout.splitlines()[1].split()[5] }}"
-  when: ansible_os_family != "AIX" and disk_info.rc == 0
+  when: ansible_facts['os_family'] != "AIX" and disk_info.rc == 0
 
 - name: Parse Disk Space Information for /opt (AIX)
   ansible.builtin.set_fact:
@@ -119,7 +119,7 @@
       available_mb: "{{ (disk_info_aix.stdout.splitlines()[1].split()[2] | float * 1024) | int }}"
       use_percent: "{{ disk_info_aix.stdout.splitlines()[1].split()[3] }}"
       mount_point: "{{ disk_info_aix.stdout.splitlines()[1].split()[6] }}"
-  when: ansible_os_family == "AIX" and disk_info_aix.rc == 0
+  when: ansible_facts['os_family'] == "AIX" and disk_info_aix.rc == 0
 
 - name: Collect All System Information
   ansible.builtin.set_fact:
