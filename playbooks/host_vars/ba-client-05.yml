@@ -1,8 +1,9 @@
 ---
-# Host-specific variables for ba-client-01
+# Host-specific variables for ba-client-03
 # This file contains configuration specific to this BA Client node
 # 
-# CUSTOMER: Edit this file to customize settings for ba-client-01
+# CUSTOMER: Edit this file to customize settings for ba-client-03
+# NOTE: This example shows custom installation paths
 
 # ============================================================================
 # BA Client Installation Settings
@@ -23,10 +24,8 @@ os_type: "LinuxX86"
 # Full path to the BA Client installation package on THIS remote node
 # The package must exist at this location before running the playbook
 # Format: <version>-TIV-TSMBAC-<os_type>.tar
-ba_client_package_path: "/tmp/8.1.27.0-TIV-TSMBAC-LinuxX86.tar "
-
-# Alternative: If package is in a different location
-# ba_client_package_path: "/opt/software/8.2.1.0-TIV-TSMBAC-LinuxX86.tar"
+# Using the same package location as other nodes
+ba_client_package_path: "/tmp/8.1.27.0-TIV-TSMBAC-LinuxX86.tar"
 
 # ============================================================================
 # Installation Directories
@@ -36,7 +35,7 @@ ba_client_package_path: "/tmp/8.1.27.0-TIV-TSMBAC-LinuxX86.tar "
 ba_client_extract_dest: "/opt/baClient"
 
 # Temporary directory for installation files
-ba_client_temp_dest: "/tmp/"
+ba_client_temp_dest: "/var/tmp/"
 
 # ============================================================================
 # Service Configuration
@@ -58,18 +57,22 @@ ba_client_state: "present"
 # SP Server Connection (Optional - for dsm.sys configuration)
 # ============================================================================
 
-# Uncomment and configure if you want to pre-configure server connection
-# sp_server_name: "PETASCALE-SP01"
-# sp_server_address: "192.168.1.100"
-# sp_server_port: "1500"
-# node_name: "ba-client-01"
+# Pre-configured server connection for this node
+sp_server_name: "SRV-01"
+sp_server_address: "9.11.53.42"
+sp_server_port: "1500"
+node_name: "ba-client-01"
 
 # ============================================================================
 # Advanced Settings (Optional)
 # ============================================================================
 
-# Compatible architectures for SP Server - using role defaults
+# Compatible architectures for SP Server
+sp_server_compatible_architectures:
+  - x86_64
+  - s390x
+  - ppc64le
 
 # Additional installation options (uncomment if needed)
-# ba_client_install_options: ""
-# ba_client_config_file: "/opt/tivoli/tsm/client/ba/bin/dsm.opt"
+# ba_client_install_options: "-silent"
+# ba_client_config_file: "/usr/local/baClient/bin/dsm.opt"

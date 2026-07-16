@@ -1,0 +1,506 @@
+
+MULTI-SERVER IBM SPECTRUM PROTECT CONTROL NODE RUNBOOK
+=====================================================
+
+OBJECTIVE:
+----------
+- Single control node connecting to multiple Spectrum Protect servers
+- Parallel backup of GPFS filesets
+- Scalable, modular configuration
+- Suitable for HSM and active binding
+
+------------------------------------------------------------
+1. ARCHITECTURE OVERVIEW
+------------------------------------------------------------
+Control Node (Client)
+   |---- SP01 Server (fileset_2)
+   |---- SP03 Server (fileset_3)
+   |---- SP0N Server (fileset_n)
+
+Each server is independent with its own:
+- Node
+- Policy
+- Storage
+
+------------------------------------------------------------
+2. CLIENT CONFIGURATION (dsm.sys)
+------------------------------------------------------------
+Template:
+
+SERVERNAME <SERVER_ALIAS>
+  COMMmethod         TCPip
+  TCPPort            <PORT>
+  TCPServeraddress   <SERVER_IP_OR_HOSTNAME>
+  NODename           <UNIQUE_NODE_NAME>
+  PASSWORDACCESS     GENERATE
+  ERRORLOGNAME       /var/log/tsm/dsmerror_<SERVER_ALIAS>.log
+  SCHEDLOGNAME       /var/log/tsm/dsmsched_<SERVER_ALIAS>.log
+
+Example:
+
+SERVERNAME PETASCALE-SP01
+  COMMmethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.28
+  NODename           hsm-client-03-sp01
+  PASSWORDACCESS     GENERATE
+  ERRORLOGNAME       /var/log/tsm/dsmerror_sp01.log
+  SCHEDLOGNAME       /var/log/tsm/dsmsched_sp01.log
+
+SERVERNAME PETASCALE-SP03
+  COMMmethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.254
+  NODename           hsm-client-03-sp03
+  PASSWORDACCESS     GENERATE
+  ERRORLOGNAME       /var/log/tsm/dsmerror_sp03.log
+  SCHEDLOGNAME       /var/log/tsm/dsmsched_sp03.log
+
+------------------------------------------------------------
+3. CLIENT OPTIONS FILE (dsm.opt)
+------------------------------------------------------------
+SERVERNAME PETASCALE-SP01
+
+Note: Default server does not matter when using -servername
+
+------------------------------------------------------------
+4. CERTIFICATE MANAGEMENT
+------------------------------------------------------------
+For each server:
+
+Extract certificate:
+
+openssl s_client -connect <IP>:<PORT> -showcerts
+
+Save certificate:
+
+echo | openssl s_client -connect <IP>:<PORT> -showcerts 2>/dev/null \
+  | sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' > /tmp/<server>.arm
+
+Add certificate:
+
+/opt/tivoli/tsm/client/ba/bin/dsmcert \
+  -add -server <SERVER_ALIAS> -file /tmp/<server>.arm
+
+IMPORTANT:
+- One client uses one cert DB
+- Add ALL server certificates
+
+------------------------------------------------------------
+5. SERVER SIDE CONFIGURATION
+------------------------------------------------------------
+On each server:
+
+register node <NODE_NAME> <PASSWORD> domain=STANDARD maxnummp=4
+
+Example:
+
+register node hsm-client-03-sp01 Pass123 domain=STANDARD
+register node hsm-client-03-sp03 Pass123 domain=STANDARD
+
+------------------------------------------------------------
+6. POLICY SETUP (PER SERVER)
+------------------------------------------------------------
+Policies are independent per server:
+
+Example:
+
+define domain GPFS_DOMAIN
+define policyset GPFS_DOMAIN STANDARD
+define mgmtclass GPFS_DOMAIN STANDARD MC_DEFAULT
+assign defmgmtclass GPFS_DOMAIN STANDARD MC_DEFAULT
+activate policyset GPFS_DOMAIN STANDARD
+
+------------------------------------------------------------
+7. GPFS FILESET BACKUP DESIGN
+------------------------------------------------------------
+IMPORTANT:
+- DOMAIN must be filesystem, not directory
+
+Correct:
+DOMAIN /gpfs_main
+
+Use fileset path in backup command
+
+------------------------------------------------------------
+8. PARALLEL BACKUP COMMANDS
+------------------------------------------------------------
+
+Example:
+
+dsmc incr /gpfs_main/fileset_2 -servername=PETASCALE-SP01 &
+dsmc incr /gpfs_main/fileset_3 -servername=PETASCALE-SP03 &
+
+------------------------------------------------------------
+9. HSM DESIGN PRINCIPLES
+------------------------------------------------------------
+Each fileset must map to:
+- Dedicated server
+- Dedicated node
+
+Example:
+fileset_2 -> SP01 -> hsm-client-03-sp01
+fileset_3 -> SP03 -> hsm-client-03-sp03
+
+------------------------------------------------------------
+10. ADD / REMOVE SERVER
+------------------------------------------------------------
+Add:
+1. Add entry in dsm.sys
+2. Register node
+3. Add certificate
+4. Run backup
+
+Remove:
+1. Remove config block
+2. Stop jobs
+3. Optional cert cleanup
+
+------------------------------------------------------------
+11. VALIDATION COMMANDS
+------------------------------------------------------------
+
+Test client:
+dsmc q sess -servername=<SERVER>
+
+Admin access:
+dsmadmc -se=<SERVER>
+
+Check nodes:
+query node
+
+Check certificates:
+gsk8capicmd -cert -list -db dsmcert.kdb -stashed
+
+------------------------------------------------------------
+12. COMMON ISSUES & FIXES
+------------------------------------------------------------
+
+Certificate error:
+-> Extract + dsmcert add
+
+SSL error:
+-> Port mismatch
+
+Auth failure:
+-> Reset password or re-register node
+
+Parallel failure:
+-> Password not stored, use GENERATE
+
+------------------------------------------------------------
+13. BEST PRACTICES
+------------------------------------------------------------
+
+- Unique node per server
+- Separate log files
+- Use PASSWORDACCESS GENERATE
+- Store all certificates
+- Use -servername for parallel jobs
+
+------------------------------------------------------------
+END OF DOCUMENT
+------------------------------------------------------------
+
+
+
+checked backing up using mmbackup for hsm clients
+
+[root@p9d-vm4 bin]# /usr/lpp/mmfs/bin/mmbackup /gpfs_main/fileset_3     --scope inodespace     --tsm-servers PETASCALE-SP03     -t full
+--------------------------------------------------------
+mmbackup: Backup of /gpfs_main/fileset_3 begins at Tue Jun 23 07:36:34 MST 2026.
+--------------------------------------------------------
+2026-06-23_07:36:42.237-0700 mmbackup:Scanning fileset gpfs_main.fileset_3
+2026-06-23_07:36:43.197-0700 mmbackup:Fileset scan of gpfs_main.fileset_3 is complete.
+2026-06-23_07:36:43.200-0700 mmbackup:Calculating backup and expire lists for server PETASCALE-SP03
+2026-06-23_07:36:43.207-0700 mmbackup:Sending files to the TSM server [2 changed, 0 expired].
+<1> ANS1311E Server out of data storage space
+<1> ANS1311E Server out of data storage space
+2026-06-23_07:36:45.847-0700 mmbackup:Some dsmc backup or update jobs failed with return code 12.
+mmbackup: TSM Summary Information:
+	Total number of objects inspected: 	3
+	Total number of objects backed up: 	0
+	Total number of objects updated: 	0
+	Total number of objects rebound: 	0
+	Total number of objects deleted: 	0
+	Total number of objects expired: 	0
+	Total number of objects failed: 	1
+	Total number of objects encrypted: 	0
+	Total number of bytes inspected: 	19
+	Total number of bytes transferred: 	104
+LD_LIBRARY_PATH= /usr/bin/dsmc selective /gpfs_main/fileset_3/.mmbackupShadow.1.PETASCALE-SP03.fileset -servername=PETASCALE-SP03   returned rc=12.  Continuing with output analysis.
+2026-06-23_07:36:47.721-0700 mmbackup:LD_LIBRARY_PATH= /usr/bin/dsmc selective /gpfs_main/fileset_3/.mmbackupShadow.1.PETASCALE-SP03.fileset -servername=PETASCALE-SP03   failed with rc=12,  error message count = 1.  Continuing...
+        ANS1311E Server out of data storage space
+2026-06-23_07:36:47.723-0700 mmbackup:Full backup failed. 
+	TSM had 2 severe errors and returned 0. See the TSM log file for more information.
+ 	0 files had errors, 
+ TSM exit status:  exit 12
+----------------------------------------------------------
+mmbackup: Backup of /gpfs_main/fileset_3 completed with errors at Tue Jun 23 07:36:47 MST 2026.
+----------------------------------------------------------
+mmbackup: Command failed. Examine previous error messages to determine cause.
+[root@p9d-vm4 bin]# /usr/lpp/mmfs/bin/mmbackup /gpfs_main/fileset_3     --scope inodespace     --tsm-servers PETASCALE-SP03     -t full
+--------------------------------------------------------
+mmbackup: Backup of /gpfs_main/fileset_3 begins at Tue Jun 23 07:46:16 MST 2026.
+--------------------------------------------------------
+2026-06-23_07:46:24.753-0700 mmbackup:Scanning fileset gpfs_main.fileset_3
+2026-06-23_07:46:25.734-0700 mmbackup:Fileset scan of gpfs_main.fileset_3 is complete.
+2026-06-23_07:46:25.737-0700 mmbackup:Calculating backup and expire lists for server PETASCALE-SP03
+2026-06-23_07:46:25.746-0700 mmbackup:Sending files to the TSM server [2 changed, 0 expired].
+mmbackup: TSM Summary Information:
+	Total number of objects inspected: 	2
+	Total number of objects backed up: 	2
+	Total number of objects updated: 	0
+	Total number of objects rebound: 	0
+	Total number of objects deleted: 	0
+	Total number of objects expired: 	0
+	Total number of objects failed: 	0
+	Total number of objects encrypted: 	0
+	Total number of bytes inspected: 	19
+	Total number of bytes transferred: 	52
+----------------------------------------------------------
+mmbackup: Backup of /gpfs_main/fileset_3 completed successfully at Tue Jun 23 07:46:30 MST 2026.
+----------------------------------------------------------
+
+
+
+
+
+Step 1: Copy Certificate from SP Server to HSM Client
+
+# On SP Server (as tsminst1)
+cd /home/tsminst1
+
+# Copy certificate to HSM client
+scp cert256.arm root@p9d-vm4.storage.tucson.ibm.com:/tmp/sp01-cert.arm
+
+# Also copy for SP Server 02 (if needed)
+# SSH to SP Server 02 and repeat
+
+Step 2: Import Certificate on HSM Client
+
+# On HSM client
+ssh root@p9d-vm4.storage.tucson.ibm.com
+
+# Import the certificate
+gsk8capicmd_64 -cert -add \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed \
+  -label "PETASCALE-SP01" \
+  -file /tmp/sp01-cert.arm \
+  -format ascii
+
+# Verify import
+gsk8capicmd_64 -cert -list \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed
+
+# Should show: PETASCALE-SP01
+
+Step 3: Test Connection
+
+# Test dsmc
+dsmc query session -servername=PETASCALE-SP01
+
+# Should work now without certificate error!
+
+Step 4: Repeat for SP Server 02 (PETASCALE-SP03)
+
+# SSH to SP Server 02 (9.11.53.254)
+ssh onecloud-user@9.11.53.254
+sudo su - tsminst1
+cd /home/tsminst1
+
+# Copy certificate
+scp cert256.arm root@p9d-vm4.storage.tucson.ibm.com:/tmp/sp03-cert.arm
+
+# On HSM client, import
+gsk8capicmd_64 -cert -add \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed \
+  -label "PETASCALE-SP03" \
+  -file /tmp/sp03-cert.arm \
+  -format ascii
+
+# Test
+dsmc query session -servername=PETASCALE-SP03
+
+📋 COMPLETE COMMAND SEQUENCE
+Execute these commands in order:
+
+# ============================================
+# ON SP SERVER 01 (9.11.53.28)
+# ============================================
+ssh onecloud-user@9.11.53.28
+sudo su - tsminst1
+cd /home/tsminst1
+scp cert256.arm root@p9d-vm4.storage.tucson.ibm.com:/tmp/sp01-cert.arm
+exit
+exit
+
+# ============================================
+# ON SP SERVER 02 (9.11.53.254)
+# ============================================
+ssh onecloud-user@9.11.53.254
+sudo su - tsminst1
+cd /home/tsminst1
+scp cert256.arm root@p9d-vm4.storage.tucson.ibm.com:/tmp/sp03-cert.arm
+exit
+exit
+
+# ============================================
+# ON HSM CLIENT (p9d-vm4)
+# ============================================
+ssh root@p9d-vm4.storage.tucson.ibm.com
+
+# Import SP01 certificate
+gsk8capicmd_64 -cert -add \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed \
+  -label "PETASCALE-SP01" \
+  -file /tmp/sp_certs/cert_PETASCALE-SP01.arm \
+  -format ascii
+
+# Import SP03 certificate
+gsk8capicmd_64 -cert -add \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed \
+  -label "PETASCALE-SP03" \
+  -file /tmp/sp03-cert.arm \
+  -format ascii
+
+# Verify both certificates imported
+gsk8capicmd_64 -cert -list \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed
+
+# Test SP01
+dsmc query session -servername=PETASCALE-SP01
+
+# Test SP03
+dsmc query session -servername=PETASCALE-SP03
+
+# Test mmbackup (YOUR ORIGINAL GOAL!)
+mmbackup /gpfs_main/fileset_2 \
+  --scope inodespace \
+  --tsm-servers PETASCALE-SP01 \
+  -t full
+
+mmbackup /gpfs_main/fileset_3 \
+  --scope inodespace \
+  --tsm-servers PETASCALE-SP03 \
+  -t full
+
+
+✅ EXPECTED RESULTS
+After importing certificates:
+
+[root@p9d-vm4 ~]# dsmc query session -servername=PETASCALE-SP01
+IBM Storage Protect
+Command Line Backup-Archive Client Interface
+  Client Version 8, Release 2, Level 0.0 
+  Client date/time: 06/24/2026 02:50:00
+(c) Copyright IBM Corp. 1990, 2025. All Rights Reserved. 
+
+Node Name: HSM-CLIENT-03-SP01
+Session established with server PETASCALE-SP01: Linux/x86_64
+  Server Version 8, Release 1, Level 27.000
+  Server date/time: 06/24/2026 02:50:00
+
+ANS1302E No objects on server match query
+
+No more certificate errors! ✅
+
+🎯 SUMMARY OF COMPLETE SOLUTION
+Your Original Problem:
+
+mmbackup: Configuration file /opt/tivoli/tsm/client/ba/bin/dsm.sys is missing
+
+Solution Journey:
+
+✅ Identified HSM clients need BA client configuration
+✅ Added hsm-client-03 to [ba_clients] group
+✅ Ran playbook to create BA client config
+✅ BA client dsm.sys created successfully
+✅ Found certificate files on SP servers
+🎯 Import certificates to complete setup
+🎉 Test mmbackup - DONE!
+
+
+
+# On SP03 server
+ssh onecloud-user@9.11.53.254
+sudo su - tsminst1
+cd /home/tsminst1
+
+# Copy certificate to HSM client
+scp cert256.arm root@p9d-vm4.storage.tucson.ibm.com:/tmp/sp03-cert.arm
+
+Step 2: Import Certificate on HSM Client
+# On HSM client
+ssh root@p9d-vm4.storage.tucson.ibm.com
+
+# Import SP03 certificate
+gsk8capicmd_64 -cert -add \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed \
+  -label "PETASCALE-SP03" \
+  -file /tmp/sp03-cert.arm \
+  -format ascii
+
+# Verify both certificates now present
+gsk8capicmd_64 -cert -list \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed
+
+Expected Output:
+
+Certificates found
+* default, - personal, ! trusted, # secret key
+!	PETASCALE-SP01
+!	PETASCALE-SP03  ← Should appear now
+
+Step 3: Test Connection
+# On HSM client
+dsmc query session -servername=PETASCALE-SP03
+dsmadmc -se=PETASCALE-SP03 -id=admin -password=admin@@123456789 "query session"
+
+📋 COMPLETE FIX SCRIPT (Copy-Paste)
+#!/bin/bash
+# ============================================
+# Import SP03 Certificate
+# ============================================
+
+echo "Step 1: Copy certificate from SP03 to HSM client"
+ssh onecloud-user@9.11.53.254 "sudo su - tsminst1 -c 'scp /home/tsminst1/cert256.arm root@p9d-vm4.storage.tucson.ibm.com:/tmp/sp03-cert.arm'"
+
+echo ""
+echo "Step 2: Import certificate on HSM client"
+ssh root@p9d-vm4.storage.tucson.ibm.com << 'EOF'
+
+# Import certificate
+gsk8capicmd_64 -cert -add \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed \
+  -label "PETASCALE-SP03" \
+  -file /tmp/sp03-cert.arm \
+  -format ascii
+
+# Verify
+echo ""
+echo "=== Certificates in database ==="
+gsk8capicmd_64 -cert -list \
+  -db /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb \
+  -stashed
+
+# Test connection
+echo ""
+echo "=== Testing SP03 connection ==="
+dsmc query session -servername=PETASCALE-SP03
+
+EOF
+
+echo ""
+echo "✅ Certificate import complete!"
+
+

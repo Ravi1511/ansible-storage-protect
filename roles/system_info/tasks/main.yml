@@ -52,23 +52,34 @@
     architecture: "{{ ansible_architecture | default('unknown') }}"
   when: architecture is not defined
 
+- name: Collect Architecture Information (AIX)
+  ansible.builtin.command: uname -p
+  register: uname_arch_aix
+  changed_when: false
+  ignore_errors: true
+  when: detected_os_type == "AIX"
+
+- name: Set Architecture Info (AIX)
+  ansible.builtin.set_fact:
+    architecture: "{{ uname_arch_aix.stdout }}"
+  when: detected_os_type == "AIX" and uname_arch_aix.rc == 0
+
+- name: Set default architecture if detection failed
+  ansible.builtin.set_fact:
+    architecture: "unknown"
+  when: architecture is not defined
+
+# ============================================================================
+# OS Information
+# ============================================================================
 - name: Collect OS Information using ansible setup module
   ansible.builtin.set_fact:
-    os_name: "{{ ansible_facts['os_family'] }}"
-    os_version: "{{ ansible_facts['distribution_version'] }}"
+    os_name: "{{ ansible_facts['os_family'] | default('Unknown') }}"
+    os_version: "{{ ansible_facts['distribution_version'] | default('Unknown') }}"
 
-# - name: Extract Disk Space Info (from free -m output)
-#  set_fact:
-#    disk_space:
-#      total_memory: "{{ memory_info.stdout.splitlines()[1].split()[1] }}"  # Total memory
-#      used_memory: "{{ memory_info.stdout.splitlines()[1].split()[2] }}"  # Used memory
-#      free_memory: "{{ memory_info.stdout.splitlines()[1].split()[3] }}"  # Free memory
-#      swap_total: "{{ memory_info.stdout.splitlines()[2].split()[1] }}"  # Swap total
-#      swap_used: "{{ memory_info.stdout.splitlines()[2].split()[2] }}"  # Swap used
-#      swap_free: "{{ memory_info.stdout.splitlines()[2].split()[3] }}"  # Swap free
-#  when: memory_info is defined
-#  ignore_errors: true
-
+# ============================================================================
+# Java Version
+# ============================================================================
 - name: Collect Java Version Information
   ansible.builtin.command: java -version 2>&1
   register: java_version_output
@@ -121,12 +132,38 @@
       mount_point: "{{ disk_info_aix.stdout.splitlines()[1].split()[6] }}"
   when: ansible_facts['os_family'] == "AIX" and disk_info_aix.rc == 0
 
+- name: Parse Disk Space Information for /opt (AIX)
+  ansible.builtin.set_fact:
+    disk_space:
+      filesystem: "{{ disk_info_aix.stdout.splitlines()[1].split()[0] }}"
+      size_mb: "{{ disk_info_aix.stdout.splitlines()[1].split()[1] | int }}"
+      used_mb: "{{ disk_info_aix.stdout.splitlines()[1].split()[2] | int }}"
+      available_mb: "{{ disk_info_aix.stdout.splitlines()[1].split()[2] | int }}"
+      use_percent: "{{ disk_info_aix.stdout.splitlines()[1].split()[3] }}"
+      mount_point: "{{ disk_info_aix.stdout.splitlines()[1].split()[6] }}"
+  when: detected_os_type == "AIX" and disk_info_aix.rc == 0
+
+- name: Set default disk space if detection failed
+  ansible.builtin.set_fact:
+    disk_space:
+      filesystem: "unknown"
+      size_mb: 0
+      used_mb: 0
+      available_mb: 0
+      use_percent: "0%"
+      mount_point: "/opt"
+  when: disk_space is not defined
+
+# ============================================================================
+# Collect All System Information
+# ============================================================================
 - name: Collect All System Information
   ansible.builtin.set_fact:
     system_info:
       Architecture: "{{ architecture | default('unknown') }}"
       OS Name: "{{ os_name }}"
       OS Version: "{{ os_version }}"
+      OS Type: "{{ detected_os_type }}"
       Filesystem Disk Space:
         - Free Memory: "{{ disk_space.available_mb | default(0) }} MB"
       Java Version: "{{ java_version | default('Not installed') }}"

@@ -97,6 +97,7 @@
   become: false
   tags:
     - always
+
   tasks:
     - name: Detect operating system
       raw: uname -s
@@ -194,7 +195,6 @@
 # Python 3.9 check removed - handled by petascale_prechecks.yml playbook
 # Run: ansible-playbook playbooks/petascale_prechecks.yml before uninstall
 # ============================================================================
-
 # ============================================================================
 # System Requirements Check - Removed (handled by petascale_prechecks.yml)
 # ============================================================================
@@ -916,4 +916,3 @@
         | list
         | length > 0
 
-# Made with Bob

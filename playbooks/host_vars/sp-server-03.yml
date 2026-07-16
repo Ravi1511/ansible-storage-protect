@@ -10,7 +10,7 @@
 
 # SP Server version to install
 # Must match the package file available on the remote node
-sp_server_version: "8.2.2.000"
+sp_server_version: "8.1.27.000"
 
 # Installation state
 # Options: present (install), absent (uninstall), upgrade

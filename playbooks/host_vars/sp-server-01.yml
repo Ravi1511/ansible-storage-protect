@@ -68,11 +68,11 @@ admin_password: "admin@@123456789"
 
 # Server size: xsmall, small, medium, large
 # This affects active log size and max sessions
-server_size: "medium"
+server_size: "xsmall"
 
 # Active log size (MB) - automatically set based on server_size
 # Can be overridden here if needed
-# sp_server_active_log_size: 131072
+sp_server_active_log_size: 30000
 
 # ============================================================================
 # TSM User Configuration

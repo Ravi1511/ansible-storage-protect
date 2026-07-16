@@ -148,5 +148,3 @@ hsm_client_state: "present"
 #    - Register node with SP Server
 #    - Configure HSM policies
 #    - Test migration and recall operations
-
-# Made with Bob
