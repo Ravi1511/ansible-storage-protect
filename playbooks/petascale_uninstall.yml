@@ -202,8 +202,6 @@
 # are now handled by the dedicated prechecks playbook.
 # Run: ansible-playbook playbooks/petascale_prechecks.yml before uninstall
 # ============================================================================
-
-# ============================================================================
 # Pre-Uninstall Checks for SP Servers
 # ============================================================================
 - name: Pre-uninstall checks on SP server nodes

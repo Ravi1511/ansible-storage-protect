@@ -102,13 +102,6 @@ hsm_client_state: "present"
 # Advanced Settings (Optional)
 # ============================================================================
 
-# Compatible architectures (commented out - orphaned list items)
-# hsm_client_compatible_architectures:
-#   - s390x
-#   - ppc64le
-#   - powerpc
-#   - ppc64
-
 # HSM Client configuration file location
 # hsm_client_config_file: "/opt/tivoli/tsm/client/hsm/bin/dsm.opt"
 

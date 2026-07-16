@@ -1,0 +1,563 @@
+[root@p9d-vm4 ~]# mmgetstate -a
+
+ Node number  Node name  GPFS state  
+-------------------------------------
+           1  p9d-vm4    active
+[root@p9d-vm4 ~]# mmlscluster
+
+GPFS cluster information
+========================
+  GPFS cluster name:         p9d-vm4.storage.tucson.ibm.com
+  GPFS cluster id:           12420371004546889979
+  GPFS UID domain:           p9d-vm4.storage.tucson.ibm.com
+  Remote shell command:      /usr/bin/ssh
+  Remote file copy command:  /usr/bin/scp
+  Repository type:           CCR
+
+ Node  Daemon node name                IP address  Admin node name                 Designation
+-----------------------------------------------------------------------------------------------
+   1   p9d-vm4.storage.tucson.ibm.com  9.11.66.87  p9d-vm4.storage.tucson.ibm.com  quorum
+
+
+
+ [root@p9d-vm4 ~]# lsblk
+NAME                     MAJ:MIN RM  SIZE RO TYPE  MOUNTPOINT
+sda                        8:0    0  150G  0 disk  
+`-mpatha                 253:0    0  150G  0 mpath 
+  |-mpatha1              253:1    0    4M  0 part  
+  |-mpatha2              253:2    0    1G  0 part  /boot
+  |-mpatha3              253:3    0   64G  0 part  
+  | |-rhel_p9d--vm4-root 253:5    0   60G  0 lvm   /
+  | `-rhel_p9d--vm4-swap 253:6    0    4G  0 lvm   [SWAP]
+  `-mpatha4              253:4    0   40G  0 part  
+    |-datavg-gpfs11nsd   253:7    0    2G  0 lvm   
+    |-datavg-gpfs12nsd   253:8    0    2G  0 lvm   
+    |-datavg-gpfs13nsd   253:9    0    4G  0 lvm   
+    |-datavg-gpfs14nsd   253:10   0    4G  0 lvm   
+    `-datavg-gpfs15nsd   253:11   0   20G  0 lvm   
+sdb                        8:16   0  150G  0 disk  
+`-mpatha                 253:0    0  150G  0 mpath 
+  |-mpatha1              253:1    0    4M  0 part  
+  |-mpatha2              253:2    0    1G  0 part  /boot
+  |-mpatha3              253:3    0   64G  0 part  
+  | |-rhel_p9d--vm4-root 253:5    0   60G  0 lvm   /
+  | `-rhel_p9d--vm4-swap 253:6    0    4G  0 lvm   [SWAP]
+  `-mpatha4              253:4    0   40G  0 part  
+    |-datavg-gpfs11nsd   253:7    0    2G  0 lvm   
+    |-datavg-gpfs12nsd   253:8    0    2G  0 lvm   
+    |-datavg-gpfs13nsd   253:9    0    4G  0 lvm   
+    |-datavg-gpfs14nsd   253:10   0    4G  0 lvm   
+    `-datavg-gpfs15nsd   253:11   0   20G  0 lvm   
+sdc                        8:32   0  150G  0 disk  
+`-mpatha                 253:0    0  150G  0 mpath 
+  |-mpatha1              253:1    0    4M  0 part  
+  |-mpatha2              253:2    0    1G  0 part  /boot
+  |-mpatha3              253:3    0   64G  0 part  
+  | |-rhel_p9d--vm4-root 253:5    0   60G  0 lvm   /
+  | `-rhel_p9d--vm4-swap 253:6    0    4G  0 lvm   [SWAP]
+  `-mpatha4              253:4    0   40G  0 part  
+    |-datavg-gpfs11nsd   253:7    0    2G  0 lvm   
+    |-datavg-gpfs12nsd   253:8    0    2G  0 lvm   
+    |-datavg-gpfs13nsd   253:9    0    4G  0 lvm   
+    |-datavg-gpfs14nsd   253:10   0    4G  0 lvm   
+    `-datavg-gpfs15nsd   253:11   0   20G  0 lvm   
+sdd                        8:48   0  150G  0 disk  
+`-mpatha                 253:0    0  150G  0 mpath 
+  |-mpatha1              253:1    0    4M  0 part  
+  |-mpatha2              253:2    0    1G  0 part  /boot
+  |-mpatha3              253:3    0   64G  0 part  
+  | |-rhel_p9d--vm4-root 253:5    0   60G  0 lvm   /
+  | `-rhel_p9d--vm4-swap 253:6    0    4G  0 lvm   [SWAP]
+  `-mpatha4              253:4    0   40G  0 part  
+    |-datavg-gpfs11nsd   253:7    0    2G  0 lvm   
+    |-datavg-gpfs12nsd   253:8    0    2G  0 lvm   
+    |-datavg-gpfs13nsd   253:9    0    4G  0 lvm   
+    |-datavg-gpfs14nsd   253:10   0    4G  0 lvm   
+    `-datavg-gpfs15nsd   253:11   0   20G  0 lvm   
+sr0                       11:0    1 1024M  0 rom   
+
+
+nstead of raw disk:
+Use these LVM logical volumes:
+/dev/datavg/gpfs11nsd
+/dev/datavg/gpfs12nsd
+/dev/datavg/gpfs13nsd
+/dev/datavg/gpfs14nsd
+/dev/datavg/gpfs15nsd
+
+
+vi nsd.txt
+
+%nsd:
+  device=/dev/datavg/gpfs11nsd
+  nsd=nsd1
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/datavg/gpfs12nsd
+  nsd=nsd2
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/datavg/gpfs13nsd
+  nsd=nsd3
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/datavg/gpfs14nsd
+  nsd=nsd4
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/datavg/gpfs15nsd
+  nsd=nsd5
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+
+
+ [root@p9d-vm4 ~]# cat /proc/partitions
+major minor  #blocks  name
+
+  11        0    1048575 sr0
+   8       16  157286400 sdb
+   8        0  157286400 sda
+   8       32  157286400 sdc
+   8       48  157286400 sdd
+ 253        0  157286400 dm-0
+ 253        1       4096 dm-1
+ 253        2    1048576 dm-2
+ 253        3   67141632 dm-3
+ 253        4   41943040 dm-4
+ 253        5   62914560 dm-5
+ 253        6    4222976 dm-6
+ 253        7    2097152 dm-7
+ 253        8    2097152 dm-8
+ 253        9    4194304 dm-9
+ 253       10    4194304 dm-10
+ 253       11   20971520 dm-11
+
+
+[root@p9d-vm4 ~]# ls -l /dev/mapper/
+total 0
+crw------- 1 root root 10, 236 Jun 10 14:41 control
+lrwxrwxrwx 1 root root       7 Jun 11 22:54 datavg-gpfs11nsd -> ../dm-7
+lrwxrwxrwx 1 root root       7 Jun 11 22:54 datavg-gpfs12nsd -> ../dm-8
+lrwxrwxrwx 1 root root       7 Jun 11 22:54 datavg-gpfs13nsd -> ../dm-9
+lrwxrwxrwx 1 root root       8 Jun 11 22:54 datavg-gpfs14nsd -> ../dm-10
+lrwxrwxrwx 1 root root       8 Jun 11 22:54 datavg-gpfs15nsd -> ../dm-11
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 mpatha -> ../dm-0
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 mpatha1 -> ../dm-1
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 mpatha2 -> ../dm-2
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 mpatha3 -> ../dm-3
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 mpatha4 -> ../dm-4
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 rhel_p9d--vm4-root -> ../dm-5
+lrwxrwxrwx 1 root root       7 Jun 10 14:41 rhel_p9d--vm4-swap -> ../dm-6
+
+
+mmcrnsd: 6027-1639 Command failed. Examine previous error messages to determine cause.
+[root@p9d-vm4 ~]# cat nsd.txt 
+%nsd:
+  device=/dev/dm-7
+  nsd=nsd1
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/dm-8
+  nsd=nsd2
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/dm-9
+  nsd=nsd3
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/dm-10
+  nsd=nsd4
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+%nsd:
+  device=/dev/dm-11
+  nsd=nsd5
+  servers=p9d-vm4.storage.tucson.ibm.com
+  usage=dataAndMetadata
+
+
+[root@p9d-vm4 ~]# mmcrnsd -F nsd.txt
+mmcrnsd: Processing disk dm-7
+mmcrnsd: 6027-1662 Disk device dm-7 refers to an existing NSD gpfs1nsd
+mmcrnsd: 6027-1930 Disk gpfs1nsd belongs to file system gpfs1nsd.
+mmcrnsd: Processing disk dm-8
+mmcrnsd: 6027-1662 Disk device dm-8 refers to an existing NSD gpfs2nsd
+mmcrnsd: 6027-1930 Disk gpfs2nsd belongs to file system gpfs2nsd.
+mmcrnsd: Processing disk dm-9
+mmcrnsd: 6027-1662 Disk device dm-9 refers to an existing NSD gpfs3nsd
+mmcrnsd: 6027-1930 Disk gpfs3nsd belongs to file system gpfs3nsd.
+mmcrnsd: Processing disk dm-10
+mmcrnsd: 6027-1662 Disk device dm-10 refers to an existing NSD gpfs4nsd
+mmcrnsd: 6027-1930 Disk gpfs4nsd belongs to file system gpfs4nsd.
+mmcrnsd: Processing disk dm-11
+mmcrnsd: 6027-1662 Disk device dm-11 refers to an existing NSD gpfs5nsd
+mmcrnsd: 6027-1930 Disk gpfs5nsd belongs to file system gpfs5nsd.
+mmcrnsd: 6027-1639 Command failed. Examine previous error messages to determine cause.
+
+
+[root@p9d-vm4 ~]# mmlsnsd
+
+ File system   Disk name       NSD servers                                    
+------------------------------------------------------------------------------
+ gpfs1nsd      gpfs1nsd        p9d-vm4.storage.tucson.ibm.com 
+ gpfs2nsd      gpfs2nsd        p9d-vm4.storage.tucson.ibm.com 
+ gpfs3nsd      gpfs3nsd        p9d-vm4.storage.tucson.ibm.com 
+ gpfs4nsd      gpfs4nsd        p9d-vm4.storage.tucson.ibm.com 
+ gpfs5nsd      gpfs5nsd        p9d-vm4.storage.tucson.ibm.com 
+
+
+
+ [root@p9d-vm4 ~]# mmlsfs /dev/gpfs5nsd
+flag                value                    description
+------------------- ------------------------ -----------------------------------
+ -f                 8192                     Minimum fragment (subblock) size in bytes
+ -i                 4096                     Inode size in bytes
+ -I                 32768                    Indirect block size in bytes
+ -m                 1                        Default number of metadata replicas
+ -M                 2                        Maximum number of metadata replicas
+ -r                 1                        Default number of data replicas
+ -R                 2                        Maximum number of data replicas
+ -j                 cluster                  Block allocation type
+ -D                 nfs4                     File locking semantics in effect
+ -k                 all                      ACL semantics in effect
+ -n                 4                        Estimated number of nodes that will mount file system
+ -B                 4194304                  Block size
+ -Q                 none                     Quotas accounting enabled
+                    none                     Quotas enforced
+                    none                     Default quotas enabled
+ --perfileset-quota no                       Per-fileset quota enforcement
+ --filesetdf        no                       Fileset df enabled?
+ -V                 35.00 (5.2.1.0)          File system version
+ --create-time      Wed Aug  6 22:30:35 2025 File system creation time
+ -z                 yes                      Is DMAPI enabled?
+ -L                 33554432                 Logfile size
+ -E                 yes                      Exact mtime mount option
+ -S                 relatime                 Suppress atime mount option
+ -K                 whenpossible             Strict replica allocation option
+ --fastea           yes                      Fast external attributes enabled?
+ --encryption       no                       Encryption enabled?
+ --inode-limit      66560                    Maximum number of inodes
+ --uid              57420B09:689439FB        File system UID
+ --log-replicas     0                        Number of log replicas
+ --is4KAligned      yes                      is4KAligned?
+ --rapid-repair     yes                      rapidRepair enabled?
+ --write-cache-threshold 0                   HAWC Threshold (max 65536)
+ --subblocks-per-full-block 512              Number of subblocks per full block
+ -P                 system                   Disk storage pools in file system
+ --file-audit-log   no                       File Audit Logging enabled?
+ --maintenance-mode no                       Maintenance Mode enabled?
+ --flush-on-close   no                       flush cache on file close enabled?
+ --auto-inode-limit no                       Increase maximum number of inodes per inode space automatically?
+ --nfs4-owner-write-acl yes                  Do object owners have implicit WRITE_ACL permission?
+ --inode-segment-mgr yes                  Is Ialloc Segment Manager enabled?
+ -d                 gpfs5nsd                 Disks in file system
+ -A                 yes                      Automatic mount option
+ -o                 none                     Additional mount options
+ -T                 /SMSVT/mmfs5             Default mount point
+ --mount-priority   0                        Mount priority
+
+
+
+
+[root@p9d-vm4 ~]# mmlsdisk /dev/gpfs5nsd
+disk         driver   sector     failure holds    holds                            storage
+name         type       size       group metadata data  status        availability pool
+------------ -------- ------ ----------- -------- ----- ------------- ------------ ------------
+gpfs5nsd     nsd         512          -1 yes      yes   ready         up           system       
+
+
+[root@p9d-vm4 ~]# mmmount gpfs5nsd -a
+Thu Jun 11 23:07:24 MST 2026: 6027-1623 mmmount: Mounting file systems ...
+p9d-vm4.storage.tucson.ibm.com:  mount: /SMSVT/mmfs5: can't read superblock on gpfs5nsd.
+mmmount: 6027-1639 Command failed. Examine previous error messages to determine cause.
+
+
+[root@p9d-vm4 ~]# df -h | grep mmfs
+[root@p9d-vm4 ~]# mmmount all -a
+Thu Jun 11 23:09:49 MST 2026: 6027-1623 mmmount: Mounting file systems ...
+p9d-vm4.storage.tucson.ibm.com:  mount: /SMSVT/mmfs1: can't read superblock on gpfs1nsd.
+p9d-vm4.storage.tucson.ibm.com:  mount: /SMSVT/mmfs2: can't read superblock on gpfs2nsd.
+p9d-vm4.storage.tucson.ibm.com:  mount: /SMSVT/mmfs3: can't read superblock on gpfs3nsd.
+p9d-vm4.storage.tucson.ibm.com:  mount: /SMSVT/mmfs4: can't read superblock on gpfs4nsd.
+^Cmmdsh: Caught SIG INT - terminating the child processes.
+mmmount: 6027-1556 Interrupt received.
+[root@p9d-vm4 ~]# ^C
+[root@p9d-vm4 ~]# ^C
+[root@p9d-vm4 ~]# mmumount all -a
+Thu Jun 11 23:10:30 MST 2026: 6027-1674 mmumount: Unmounting file systems ...
+[root@p9d-vm4 ~]# mmdelfs gpfs1nsd
+
+GPFS: 6027-573 All data on the following disks of gpfs1nsd will be destroyed:
+    gpfs1nsd
+GPFS: 6027-574 Completed deletion of file system /dev/gpfs1nsd.
+mmdelfs: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelfs gpfs2nsd
+GPFS: 6027-573 All data on the following disks of gpfs2nsd will be destroyed:
+    gpfs2nsd
+GPFS: 6027-574 Completed deletion of file system /dev/gpfs2nsd.
+mmdelfs: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelfs gpfs3nsd
+GPFS: 6027-573 All data on the following disks of gpfs3nsd will be destroyed:
+    gpfs3nsd
+GPFS: 6027-574 Completed deletion of file system /dev/gpfs3nsd.
+mmdelfs: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelfs gpfs4nsd
+GPFS: 6027-573 All data on the following disks of gpfs4nsd will be destroyed:
+    gpfs4nsd
+GPFS: 6027-574 Completed deletion of file system /dev/gpfs4nsd.
+mmdelfs: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelfs gpfs5nsd
+GPFS: 6027-573 All data on the following disks of gpfs5nsd will be destroyed:
+    gpfs5nsd
+GPFS: 6027-574 Completed deletion of file system /dev/gpfs5nsd.
+mmdelfs: mmsdrfs propagation completed.
+
+
+[root@p9d-vm4 ~]# mmlsfs all
+mmlsfs: 6027-1300 No file systems were found.
+mmlsfs: 6027-1639 Command failed. Examine previous error messages to determine cause.
+
+
+[root@p9d-vm4 ~]# mmlsnsd
+
+ File system   Disk name       NSD servers                                    
+------------------------------------------------------------------------------
+ (free disk)   gpfs1nsd        p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   gpfs2nsd        p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   gpfs3nsd        p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   gpfs4nsd        p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   gpfs5nsd        p9d-vm4.storage.tucson.ibm.com 
+
+
+[root@p9d-vm4 ~]# mmcrfs gpfs1 "gpfs1nsd;gpfs2nsd;gpfs3nsd;gpfs4nsd;gpfs5nsd" -T /gpfs1 -A yes
+
+GPFS: 6027-531 The following disks of gpfs1 will be formatted on node p9d-vm4.storage.tucson.ibm.com:
+    gpfs1nsd: size 2048 MB
+    gpfs2nsd: size 2048 MB
+    gpfs3nsd: size 4096 MB
+    gpfs4nsd: size 4096 MB
+    gpfs5nsd: size 20480 MB
+GPFS: 6027-540 Formatting file system ...
+GPFS: 6027-535 Disks up to size 195.49 GB can be added to storage pool system.
+Creating Inode File
+Creating Allocation Maps
+Creating Log Files
+Clearing Inode Allocation Map
+Clearing Block Allocation Map
+Formatting Allocation Map for storage pool system
+GPFS: 6027-572 Completed creation of file system /dev/gpfs1.
+mmcrfs: mmsdrfs propagation completed.
+
+[root@p9d-vm4 ~]# cat fs_disks.txt 
+gpfs1nsd
+gpfs2nsd
+gpfs3nsd
+gpfs4nsd
+gpfs5nsd
+
+
+
+
+[root@p9d-vm4 ~]# mmcrfs gpfs1 -F fs_disks.txt -T /gpfs1 -A yes
+mmcrfs: 6027-1207 There is already an existing file system using gpfs1
+mmcrfs: 6027-1639 Command failed. Examine previous error messages to determine cause.
+
+
+[root@p9d-vm4 ~]# mmdelnsd gpfs1nsd
+mmdelnsd: 6027-1930 Disk gpfs1nsd belongs to file system gpfs1.
+mmdelnsd: 6027-1932 No disks were specified that could be deleted.
+mmdelnsd: 6027-1639 Command failed. Examine previous error messages to determine cause.
+[root@p9d-vm4 ~]# mmlsfs all | grep gpfs1
+File system attributes for /dev/gpfs1:
+ -d                 gpfs1nsd;gpfs2nsd;gpfs3nsd;gpfs4nsd;gpfs5nsd  Disks in file system
+ -T                 /gpfs1                   Default mount point
+[root@p9d-vm4 ~]# mmdelfs gpfs1
+GPFS: 6027-573 All data on the following disks of gpfs1 will be destroyed:
+    gpfs1nsd
+    gpfs2nsd
+    gpfs3nsd
+    gpfs4nsd
+    gpfs5nsd
+GPFS: 6027-574 Completed deletion of file system /dev/gpfs1.
+mmdelfs: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelnsd gpfs1nsd
+
+mmdelnsd: Processing disk gpfs1nsd
+mmdelnsd: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelnsd gpfs2nsd
+mmdelnsd: Processing disk gpfs2nsd
+mmdelnsd: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelnsd gpfs3nsd
+mmdelnsd: Processing disk gpfs3nsd
+mmdelnsd: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelnsd gpfs4nsd
+mmdelnsd: Processing disk gpfs4nsd
+mmdelnsd: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmdelnsd gpfs5nsd
+mmdelnsd: Processing disk gpfs5nsd
+mmdelnsd: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmcrnsd -F nsd.txt
+mmcrnsd: Processing disk dm-7
+mmcrnsd: Processing disk dm-8
+mmcrnsd: Processing disk dm-9
+mmcrnsd: Processing disk dm-10
+mmcrnsd: Processing disk dm-11
+mmcrnsd: mmsdrfs propagation completed.
+
+[root@p9d-vm4 ~]# mmlsnsd
+
+ File system   Disk name       NSD servers                                    
+------------------------------------------------------------------------------
+ (free disk)   nsd1            p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   nsd2            p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   nsd3            p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   nsd4            p9d-vm4.storage.tucson.ibm.com 
+ (free disk)   nsd5            p9d-vm4.storage.tucson.ibm.com 
+
+
+
+[root@p9d-vm4 ~]# cat fs_disks.txt 
+nsd1
+nsd2
+nsd3
+nsd4
+nsd5
+[root@p9d-vm4 ~]# mmcrfs gpfs_main -F fs_disks.txt -T /gpfs_main -A yes
+
+GPFS: 6027-531 The following disks of gpfs_main will be formatted on node p9d-vm4.storage.tucson.ibm.com:
+    nsd1: size 2048 MB
+    nsd2: size 2048 MB
+    nsd3: size 4096 MB
+    nsd4: size 4096 MB
+    nsd5: size 20480 MB
+GPFS: 6027-540 Formatting file system ...
+GPFS: 6027-535 Disks up to size 195.49 GB can be added to storage pool system.
+Creating Inode File
+Creating Allocation Maps
+Creating Log Files
+Clearing Inode Allocation Map
+Clearing Block Allocation Map
+Formatting Allocation Map for storage pool system
+GPFS: 6027-572 Completed creation of file system /dev/gpfs_main.
+mmcrfs: mmsdrfs propagation completed.
+[root@p9d-vm4 ~]# mmmount gpfs_main -a
+Thu Jun 11 23:18:47 MST 2026: 6027-1623 mmmount: Mounting file systems ...
+[root@p9d-vm4 ~]# 
+
+
+[root@p9d-vm4 ~]# df -h | grep gpfs_main
+gpfs_main                        32G  2.0G   31G   6% /gpfs_main
+[root@p9d-vm4 ~]# 
+
+[root@p9d-vm4 ~]# mmcrfileset gpfs_main testfs
+Fileset testfs created with id 1 root inode 60672.
+
+[root@p9d-vm4 ~]# mmcrfileset gpfs_main fileset_1 --inode-space new
+
+Fileset fileset_1 created with id 2 root inode 262147.
+[root@p9d-vm4 ~]# mmcrfileset gpfs_main fileset_2 --inode-space new
+Fileset fileset_2 created with id 3 root inode 524291.
+[root@p9d-vm4 ~]# mmcrfileset gpfs_main fileset_3 --inode-space new
+Fileset fileset_3 created with id 4 root inode 786435.
+
+[root@p9d-vm4 ~]# mmlinkfileset gpfs_main fileset_1 -J /gpfs_main/fileset_1
+
+Fileset fileset_1 linked at /gpfs_main/fileset_1
+[root@p9d-vm4 ~]# mmlinkfileset gpfs_main fileset_2 -J /gpfs_main/fileset_2
+Fileset fileset_2 linked at /gpfs_main/fileset_2
+[root@p9d-vm4 ~]# mmlinkfileset gpfs_main fileset_3 -J /gpfs_main/fileset_3
+Fileset fileset_3 linked at /gpfs_main/fileset_3
+[root@p9d-vm4 ~]# 
+
+
+[root@p9d-vm4 ~]# mmlsfileset gpfs_main
+Filesets in file system 'gpfs_main':
+Name                     Status    Path                                    
+root                     Linked    /gpfs_main                              
+testfs                   Unlinked  --                                      
+fileset_1                Linked    /gpfs_main/fileset_1                    
+fileset_2                Linked    /gpfs_main/fileset_2                    
+fileset_3                Linked    /gpfs_main/fileset_3   
+
+[root@p9d-vm4 ~]# mmlinkfileset gpfs_main testfs -J /gpfs_main/testfs
+Fileset testfs linked at /gpfs_main/testfs
+[root@p9d-vm4 ~]# touch /gpfs_main/fileset_1/file1
+[root@p9d-vm4 ~]# ls /gpfs_main/fileset_1
+file1
+
+
+[root@p9d-vm4 ~]# mmdf gpfs_main
+disk                disk size  failure holds    holds           free in KB          free in KB
+name                    in KB    group metadata data        in full blocks        in fragments
+--------------- ------------- -------- -------- ----- -------------------- -------------------
+Disks in storage pool: system (Maximum disk size allowed is 195.49 GB)
+nsd1                  2097152       -1 yes      yes         1589248 ( 76%)         11640 ( 1%) 
+nsd2                  2097152       -1 yes      yes         1597440 ( 76%)         11128 ( 1%) 
+nsd3                  4194304       -1 yes      yes         3567616 ( 85%)         17272 ( 0%) 
+nsd4                  4194304       -1 yes      yes         3571712 ( 85%)         17272 ( 0%) 
+nsd5                 20971520       -1 yes      yes        19988480 ( 95%)         14936 ( 0%) 
+                -------------                         -------------------- -------------------
+(pool total)         33554432                              30314496 ( 90%)         72248 ( 0%)
+
+                =============                         ==================== ===================
+(total)              33554432                              30314496 ( 90%)         72248 ( 0%)
+
+Inode Information
+-----------------
+Total number of used inodes in all Inode spaces:               4043
+Total number of free inodes in all Inode spaces:             435253
+Total number of allocated inodes in all Inode spaces:        439296
+Total of Maximum number of inodes in all Inode spaces:       439296
+
+
+
+---------------------------
+
+
+
+
+Protect: SERVER1>QUERY FILESPACE HSM-CLIENT-03-SP01
+
+Node Name           Filespace           FSID     Platform     Filespac-     Is Filesp-        Capacity      Pct 
+                    Name                                      e Type        ace Unico-                      Util
+                                                                               de?                         
+---------------     -----------     --------     --------     ---------     ----------     -----------     -----
+HSM-CLIENT-03--     /gpfs_main             1     LinuxPP-     GPFS              No               32 GB      47.9
+ SP01                                             C64LE                                                         
+
+Protect: SERVER1>``
+ANR2000E Unknown command - ``.
+ANS8001I Return code 2.
+
+Protect: SERVER1>DELETE FILESPACE HSM-CLIENT-03-SP01 /gpfs_main TYPE=ANY
+ANR2238W This command will result in the deletion of all inventory references to the data on filespaces that match the pattern /gpfs_main (fsId=1) for node HSM-CLIENT-03-SP01, thereby rendering the data unrecoverable.
+
+Do you wish to proceed? (Yes (Y)/No (N)) y
+ANS8003I Process number 1 started.
+
+Protect: SERVER1>q pr
+ANR0944E QUERY PROCESS: No active processes found.
+ANS8001I Return code 11.
+
+Protect: SERVER1>QUERY FILESPACE HSM-CLIENT-03-SP01
+ANR2034E QUERY FILESPACE: No match found using this criteria.
+ANS8001I Return code 11.
+
+
+

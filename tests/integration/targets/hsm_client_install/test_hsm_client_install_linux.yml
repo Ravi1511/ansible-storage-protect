@@ -191,4 +191,3 @@
           - pre_upgrade_facts.hsm_client_version == post_rollback_facts.hsm_client_version
         fail_msg: "Rollback did not restore original version"
 
-

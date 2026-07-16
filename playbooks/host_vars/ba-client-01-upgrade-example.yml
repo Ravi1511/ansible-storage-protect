@@ -85,6 +85,9 @@ ba_client_state: "present"
 # Advanced Settings (Optional)
 # ============================================================================
 
+# Compatible architectures for SP Server
+sp_server_compatible_architectures:
+  - x86_64
   - s390x
   - ppc64le
 

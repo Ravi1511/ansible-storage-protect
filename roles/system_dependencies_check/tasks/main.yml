@@ -589,4 +589,3 @@
     - not validation_passed
     - not (install_dependencies | bool)
 
-# Made with Bob

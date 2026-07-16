@@ -172,7 +172,6 @@ imcl_path: "/opt/IBM/InstallationManager/eclipse/tools/imcl"
 # Server blueprint mode
 server_blueprint: false
 
-# Compatible architectures - using role defaults
 
 # ============================================================================
 # UPGRADE CHECKLIST
@@ -201,4 +200,3 @@ server_blueprint: false
 #
 # ============================================================================
 
-# Made with Bob

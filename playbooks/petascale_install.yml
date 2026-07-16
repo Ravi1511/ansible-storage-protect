@@ -200,7 +200,7 @@
             {%- set _ = packages.append({
                 'type': 'BA Client',
                 'identifier': 'TSMBAC',
-                'search_pattern': ba_version + '*TSMBAC*.tar*'
+                'search_pattern': ba_version + '*TSMBAC*.tar'
               }) -%}
           {%- endif -%}
           {%- if 'hsm_clients' in group_names -%}

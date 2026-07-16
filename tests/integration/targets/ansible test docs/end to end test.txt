@@ -1,0 +1,196 @@
+🧪 End-to-End Testing Guide for Multi-Server HSM Configuration
+Prerequisites Check:
+# 1. Verify inventory file has hsm-client-03
+cat playbooks/inventory/petascale.ini | grep hsm-client-03
+
+# 2. Verify hsm-client-03.yml has multi-server config
+cat playbooks/host_vars/hsm-client-03.yml | grep -A 10 "sp_servers:"
+
+# 3. Check connectivity to hsm-client-03
+ansible hsm-client-03 -i playbooks/inventory/petascale.ini -m ping
+
+Step 1: Run Configuration Playbook
+cd /Users/ravithakur/Downloads/PetaScale\ work/ansible-ibm-storage-protect-2
+
+# Configure only hsm-client-03 (skip BA clients)
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit hsm-client-03 \
+  -e "configure_clients=true"
+
+Expected Output:
+
+TASK [Display HSM Client configure configuration (Multi-Server)]
+ok: [hsm-client-03] => {
+    "msg": "============================================================
+HSM CLIENT CONFIGURE INPUT (MULTI-SERVER MODE)
+============================================================
+Host              : hsm-client-03
+Number of Servers : 2
+Default Server    : PETASCALE-SP01
+
+Server 1:
+  Name            : PETASCALE-SP01
+  Address         : 9.11.53.28
+  Port            : 1500
+  Node Name       : hsm-client-03-sp01
+  GPFS Domain     : /gpfs_main/fileset_2
+
+Server 2:
+  Name            : PETASCALE-SP03
+  Address         : 9.11.53.254
+  Port            : 1500
+  Node Name       : hsm-client-03-sp03
+  GPFS Domain     : /gpfs_main/fileset_3
+============================================================"
+}
+
+Step 2: Verify Configuration Files
+# SSH to hsm-client-03
+ssh root@p9d-vm4.storage.tucson.ibm.com
+
+# Check dsm.sys (should have 2 SERVERNAME stanzas)
+cat /opt/tivoli/tsm/client/hsm/bin/dsm.sys
+
+# Check dsm.opt (should have default server)
+cat /opt/tivoli/tsm/client/hsm/bin/dsm.opt
+
+# Verify log directory
+ls -la /var/log/tsm/
+
+Expected dsm.sys:
+
+SERVERNAME PETASCALE-SP01
+  COMMMethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.28
+  NODename           hsm-client-03-sp01
+  DOMAIN             /gpfs_main/fileset_2
+  ...
+
+SERVERNAME PETASCALE-SP03
+  COMMMethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.254
+  NODename           hsm-client-03-sp03
+  DOMAIN             /gpfs_main/fileset_3
+  ...
+
+Step 3: Register Nodes on SP Servers
+On PETASCALE-SP01 (9.11.53.28):
+# SSH to sp-server-01
+ssh root@9.11.53.28
+
+# Register node for hsm-client-03
+dsmadmc -id=admin -password=<admin_password>
+
+# Inside dsmadmc:
+register node hsm-client-03-sp01 <node_password> domain=STANDARD maxnummp=4
+grant authority hsm-client-03-sp01 classes=client
+quit
+
+On PETASCALE-SP03 (9.11.53.254):
+# SSH to sp-server-03
+ssh root@9.11.53.254
+
+# Register node for hsm-client-03
+dsmadmc -id=admin -password=<admin_password>
+
+# Inside dsmadmc:
+register node hsm-client-03-sp03 <node_password> domain=STANDARD maxnummp=4
+grant authority hsm-client-03-sp03 classes=client
+quit
+
+Step 4: Test Connectivity from HSM Client
+# On hsm-client-03
+cd /opt/tivoli/tsm/client/hsm/bin
+
+# Test connection to PETASCALE-SP01
+./dsmc query session -servername=PETASCALE-SP01
+# Enter password when prompted: <node_password>
+
+# Test connection to PETASCALE-SP03
+./dsmc query session -servername=PETASCALE-SP03
+# Enter password when prompted: <node_password>
+
+Expected Output:
+
+IBM Storage Protect
+Command Line Backup-Archive Client Interface
+...
+Session established with server PETASCALE-SP01: Linux/x86_64
+Server Version 8, Release 1, Level 27.0
+
+Step 5: Test Backup Operations
+# On hsm-client-03
+
+# Create test files in different filesets
+mkdir -p /gpfs_main/fileset_2/test
+mkdir -p /gpfs_main/fileset_3/test
+echo "Test data for SP01" > /gpfs_main/fileset_2/test/file1.txt
+echo "Test data for SP03" > /gpfs_main/fileset_3/test/file1.txt
+
+# Backup fileset_2 to PETASCALE-SP01 (default server)
+./dsmc incremental /gpfs_main/fileset_2/test/
+
+# Backup fileset_3 to PETASCALE-SP03 (explicit server)
+./dsmc incremental /gpfs_main/fileset_3/test/ -servername=PETASCALE-SP03
+
+# Query backed up files on each server
+./dsmc query backup "/gpfs_main/fileset_2/*" -servername=PETASCALE-SP01
+./dsmc query backup "/gpfs_main/fileset_3/*" -servername=PETASCALE-SP03
+
+Step 6: Verify on SP Servers
+On PETASCALE-SP01:
+dsmadmc -id=admin -password=<admin_password>
+query occupancy hsm-client-03-sp01
+query filespace hsm-client-03-sp01
+
+On PETASCALE-SP03:
+dsmadmc -id=admin -password=<admin_password>
+query occupancy hsm-client-03-sp03
+query filespace hsm-client-03-sp03
+
+Troubleshooting:
+If playbook fails:
+# Check syntax
+ansible-playbook playbooks/petascale_configure.yml --syntax-check
+
+# Run with verbose output
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit hsm-client-03 \
+  -e "configure_clients=true" \
+  -vvv
+
+If connection fails:
+# Check network connectivity
+ping 9.11.53.28
+ping 9.11.53.254
+
+# Check SP Server is listening
+telnet 9.11.53.28 1500
+telnet 9.11.53.254 1500
+
+# Check dsm.sys syntax
+./dsmc query session -servername=PETASCALE-SP01 -optfile=/opt/tivoli/tsm/client/hsm/bin/dsm.opt
+
+Summary of Test Commands:
+# 1. Run playbook
+ansible-playbook playbooks/petascale_configure.yml -i playbooks/inventory/petascale.ini --limit hsm-client-03 -e "configure_clients=true"
+
+# 2. Verify files (on hsm-client-03)
+cat /opt/tivoli/tsm/client/hsm/bin/dsm.sys
+cat /opt/tivoli/tsm/client/hsm/bin/dsm.opt
+
+# 3. Register nodes (on each SP server)
+dsmadmc -id=admin -password=<pass> "register node hsm-client-03-sp01 <pass> domain=STANDARD"
+dsmadmc -id=admin -password=<pass> "register node hsm-client-03-sp03 <pass> domain=STANDARD"
+
+# 4. Test connectivity (on hsm-client-03)
+./dsmc query session -servername=PETASCALE-SP01
+./dsmc query session -servername=PETASCALE-SP03
+
+# 5. Test backup (on hsm-client-03)
+./dsmc incremental /gpfs_main/fileset_2/test/
+./dsmc incremental /gpfs_main/fileset_3/test/ -servername=PETASCALE-SP03

@@ -1,0 +1,272 @@
+
+
+
+
+
+ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini --limit ba_clients[11:57 AM]uninstall
+ansible-playbook playbooks/petascale_uninstall.yml -i playbooks/inventory/petascale.ini -e "confirm_uninstall=yes
+
+
+
+IMPORTANT: SP Server installation requires the --tags install flag
+#
+# Install ALL components (BA Client + HSM Client + SP Server):
+#   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini --tags install
+#
+# Install ONLY BA Client and HSM Client (skip SP Server):
+#   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini
+#
+# With custom variables file:
+#   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini \
+#     -e @playbooks/vars/custom_vars.yml
+#
+# Limit to specific hosts:
+#   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini \
+#     --limit ba-client-01,ba-client-02
+#
+# Limit to specific group:
+#   ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini \
+#     --limit ba_clients
+
+
+
+ansible-playbook playbooks/petascale_install.yml -i playbooks/inventory/petascale.ini
+
+
+Uninstall from all nodes (SP Servers, HSM Clients, BA Clients):
+#   ansible-playbook playbooks/petascale_uninstall.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_uninstall=yes"
+#
+# Uninstall only SP Servers:
+#   ansible-playbook playbooks/petascale_uninstall.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_uninstall=yes" \
+#     --limit sp_servers
+#
+# Uninstall only HSM Clients:
+#   ansible-playbook playbooks/petascale_uninstall.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_uninstall=yes" \
+#     --limit hsm_clients
+#
+# Uninstall only BA Clients:
+#   ansible-playbook playbooks/petascale_uninstall.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_uninstall=yes" \
+#     --limit ba_clients
+#
+# Uninstall from specific hosts only:
+#   ansible-playbook playbooks/petascale_uninstall.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_uninstall=yes" \
+#     --limit sp-server-01,ba-client-01
+#
+# Dry run (check what would be uninstalled):
+#   ansible-playbook playbooks/petascale_uninstall.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_uninstall=yes" \
+#     --check
+
+
+
+# ansible-playbook playbooks/petascale_configure.yml -i playbooks/inventory/petascale.ini -e "configure_clients=false"
+
+
+Configure all components (servers and clients):
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini
+#
+# Configure ONLY SP Servers (skip BA Clients):
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "configure_clients=false"
+#
+# Configure ONLY BA Clients (skip SP Servers):
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "configure_servers=false"
+#
+# Configure specific hosts using --limit:
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     --limit sp-server-01
+#
+# Configure specific group using --limit:
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     --limit sp_servers
+#
+# Combine selective execution with --limit:
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "configure_clients=false" \
+#     --limit sp-server-03
+#
+# Dry run (check mode):
+#   ansible-playbook playbooks/petascale_configure.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     --check
+
+
+cd ansible-ibm-storage-protect-2 && ansible-playbook playbooks/petascale_configure.yml -i playbooks/inventory/petascale.ini --syntax-check
+
+
+
+Cleanup configuration on all SP Server nodes (force mode - default):
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini
+#
+# Cleanup configuration on specific hosts:
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     --limit sp-server-03
+#
+# Strict mode (fail if processes won't stop):
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "cleanup_force_mode=false"
+#
+# Custom retry configuration:
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "cleanup_max_retries=5" \
+#     -e "cleanup_wait_seconds=15"
+
+
+
+# ansible-playbook playbooks/petascale_configure_cleanup.yml -i playbooks/inventory/petascale.ini
+Cleanup configuration on all SP Server nodes (force mode - default):
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini
+#
+# Cleanup configuration on specific hosts:
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     --limit sp-server-03
+#
+# Strict mode (fail if processes won't stop):
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "cleanup_force_mode=false"
+#
+# Custom retry configuration:
+#   ansible-playbook playbooks/petascale_configure_cleanup.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "cleanup_max_retries=5" \
+#     -e "cleanup_wait_seconds=15"
+
+
+
+
+
+I've successfully automated multi-server HSM client configuration with per-server GPFS filesets. The solution supports both multi-server and single-server modes with backward compatibility.
+
+1. Updated Configuration Files:
+hsm-client-03.yml
+New multi-server structure:
+
+sp_servers:
+  - name: "PETASCALE-SP01"
+    address: "9.11.53.28"
+    port: "1500"
+    node_name: "hsm-client-03-sp01"
+    domain: "/gpfs_main/fileset_2"
+  - name: "PETASCALE-SP03"
+    address: "9.11.53.254"
+    port: "1500"
+    node_name: "hsm-client-03-sp03"
+    domain: "/gpfs_main/fileset_3"
+
+default_server: "PETASCALE-SP01"
+
+Key features:
+
+Each server has its own node name (required for registration)
+Each server backs up different GPFS filesets/domains
+Default server specified for dsm.opt
+2. Updated Playbook Logic:
+petascale_configure.yml
+Automatic mode detection:
+
+Detects if sp_servers is defined → Multi-server mode
+Falls back to legacy variables → Single-server mode
+Generated dsm.sys (Multi-Server):
+
+SERVERNAME PETASCALE-SP01
+  COMMMethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.28
+  NODename           hsm-client-03-sp01
+  DOMAIN             /gpfs_main/fileset_2
+  ...
+
+SERVERNAME PETASCALE-SP03
+  COMMMethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.254
+  NODename           hsm-client-03-sp03
+  DOMAIN             /gpfs_main/fileset_3
+  ...
+
+Generated dsm.opt:
+
+SERVERNAME PETASCALE-SP01
+
+3. How It Works:
+Backup Operations:
+# Default server (PETASCALE-SP01) backs up /gpfs_main/fileset_2
+dsmc incremental
+
+# Explicitly use PETASCALE-SP03 to back up /gpfs_main/fileset_3
+dsmc incremental -servername=PETASCALE-SP03
+
+Each Server Configuration:
+Separate node names: Required for SP Server node registration
+Separate domains: Each server backs up different filesets
+Independent authentication: Each node needs its own password
+4. Server Registration Required:
+On each SP Server, register the corresponding node:
+
+On PETASCALE-SP01 (9.11.53.28):
+
+dsmadmc -id=admin -password=yourpass
+register node hsm-client-03-sp01 <password> domain=HSM_DOMAIN
+
+On PETASCALE-SP03 (9.11.53.254):
+
+dsmadmc -id=admin -password=yourpass
+register node hsm-client-03-sp03 <password> domain=HSM_DOMAIN
+
+5. Testing the Configuration:
+# Run the playbook
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit hsm-client-03
+
+# Verify configuration files
+cat /opt/tivoli/tsm/client/hsm/bin/dsm.sys
+cat /opt/tivoli/tsm/client/hsm/bin/dsm.opt
+
+# Test connectivity to both servers
+dsmc query session -servername=PETASCALE-SP01
+dsmc query session -servername=PETASCALE-SP03
+
+6. Backward Compatibility:
+The playbook still supports single-server configuration. Just uncomment the legacy variables in hsm-client-03.yml:
+
+# Comment out sp_servers and use these instead:
+sp_server_name: "PETASCALE-SP03"
+sp_server_address: "9.11.53.254"
+sp_server_port: "1500"
+node_name: "hsm-client-03"
+gpfs_filesystem: "/gpfs_main"
+
+
+
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit hsm-client-03 \
+  -e "configure_clients=true"
+
+

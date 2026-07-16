@@ -68,11 +68,11 @@ admin_password: "admin@@123456789"
 
 # Server size: xsmall, small, medium, large
 # This affects active log size and max sessions
-server_size: "medium"
 
+server_size: "xsmall"
 # Active log size (MB) - automatically set based on server_size
 # Can be overridden here if needed
-# sp_server_active_log_size: 131072
+sp_server_active_log_size: 30000
 
 # ============================================================================
 # TSM User Configuration
@@ -172,6 +172,26 @@ imcl_path: "/opt/IBM/InstallationManager/eclipse/tools/imcl"
 # Server blueprint mode
 server_blueprint: false
 
-# Compatible architectures - using role defaults
+# Compatible architectures
+sp_server_compatible_architectures:
+  - x86_64
 
-# Made with Bob
+# ============================================================================
+# Minimal GPFS / HSM Policy Bootstrap (Optional)
+# ============================================================================
+# Used by petascale_configure.yml to create the minimum working
+# storage pool, policy domain, management class and node registration.
+
+gpfs_policy_bootstrap_enabled: true
+gpfs_storage_pool_name: "GPFSPOOL"
+gpfs_storage_pool_directory: "/tmp/data"
+gpfs_storage_pool_max_size: "100G"
+gpfs_policy_domain: "GPFS_DOMAIN"
+gpfs_policy_set: "STANDARD"
+gpfs_mgmt_class: "GPFS_DAILY"
+gpfs_domain_description: "GPFS Filesets Backup Domain"
+gpfs_mgmt_class_description: "Daily GPFS backup"
+gpfs_copygroup_verexists: 30
+gpfs_copygroup_verdeleted: 60
+gpfs_copygroup_retextra: 30
+gpfs_copygroup_retonly: 90

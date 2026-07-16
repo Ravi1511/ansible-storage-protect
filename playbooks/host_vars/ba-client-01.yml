@@ -73,5 +73,3 @@ ba_client_state: "present"
 # Additional installation options (uncomment if needed)
 # ba_client_install_options: ""
 # ba_client_config_file: "/opt/tivoli/tsm/client/ba/bin/dsm.opt"
-
-# Made with Bob

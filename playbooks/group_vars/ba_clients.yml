@@ -43,10 +43,11 @@ ba_client_start_daemon: false
 # SP Server Compatibility
 # ============================================================================
 
-# Supported architectures (for reference)
-# supported_architectures:
-#   - s390x
-#   - ppc64le
+# Supported architectures for SP Server connections
+#sp_server_compatible_architectures:
+#  - x86_64
+#  - s390x
+#  - ppc64le
 
 # ============================================================================
 # Default Package Location

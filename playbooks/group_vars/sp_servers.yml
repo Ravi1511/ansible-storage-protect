@@ -171,4 +171,3 @@ install_location: "/opt/IBM/InstallationManager/eclipse"
 # Server blueprint mode
 server_blueprint: false
 
-# Made with Bob

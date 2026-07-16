@@ -28,7 +28,6 @@ sp_server_action: "install"
 # Specify the exact path to the SP Server binary file on the remote node
 # This eliminates ambiguity when multiple packages exist in the same directory
 sp_server_package_path: "/tmp/8.2.2.000-IBM-SPSRV-LIC-Linuxx86_64-180.bin"
-#sp_server_package_path: "/tmp/8.1.27.000-IBM-SPSRV-LIC-AIX-162.bin"
 
 # LEGACY: Pattern matching approach (kept for backward compatibility)
 # If sp_server_package_path is not defined, the system will search for files
@@ -173,6 +172,3 @@ imcl_path: "/opt/IBM/InstallationManager/eclipse/tools/imcl"
 # Server blueprint mode
 server_blueprint: false
 
-# Compatible architectures - removed, using role defaults or group_vars
-
-# Made with Bob
