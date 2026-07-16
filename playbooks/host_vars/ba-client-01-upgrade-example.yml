@@ -1,0 +1,170 @@
+---
+# ============================================================================
+# EXAMPLE: BA Client Upgrade Configuration for ba-client-01
+# ============================================================================
+#
+# This is an EXAMPLE configuration file showing how to configure a BA Client
+# for upgrade from version 8.1.24.0 to 8.2.1.0
+#
+# USAGE:
+# 1. Copy this file to: playbooks/host_vars/ba-client-01.yml
+# 2. Modify the versions and paths to match your environment
+# 3. Ensure the new version package is available on the remote node
+# 4. Run: ansible-playbook playbooks/petascale_upgrade.yml \
+#         -i playbooks/inventory/petascale.ini \
+#         -e "confirm_upgrade=yes"
+#
+# ============================================================================
+
+# ============================================================================
+# BA Client Upgrade Settings
+# ============================================================================
+
+# Target version to upgrade to
+# IMPORTANT: This must be HIGHER than the currently installed version
+# The playbook will detect the current version and prevent downgrade
+ba_client_version: "8.2.1.0"
+
+# Operating system type for package selection
+# Options: LinuxX86, LinuxX86_64, LinuxS390X, LinuxPPC64LE
+os_type: "LinuxX86"
+
+# ============================================================================
+# Package Location on Remote Node
+# ============================================================================
+
+# Full path to the NEW version BA Client package on THIS remote node
+# The package must exist at this location before running the upgrade
+# Format: <version>-TIV-TSMBAC-<os_type>.tar
+ba_client_package_path: "/tmp/8.2.1.0-TIV-TSMBAC-LinuxX86.tar"
+
+# Alternative locations (uncomment if package is elsewhere):
+# ba_client_package_path: "/opt/software/8.2.1.0-TIV-TSMBAC-LinuxX86.tar"
+# ba_client_package_path: "/mnt/nfs/ibm-packages/8.2.1.0-TIV-TSMBAC-LinuxX86.tar"
+
+# ============================================================================
+# Installation Directories (Preserved During Upgrade)
+# ============================================================================
+
+# Directory where BA Client is installed
+# This should match the existing installation location
+ba_client_extract_dest: "/opt/baClient"
+
+# Temporary directory for upgrade files
+ba_client_temp_dest: "/tmp/"
+
+# ============================================================================
+# Service Configuration
+# ============================================================================
+
+# Whether to start the BA Client daemon after upgrade
+# Options: true, false
+# Recommended: true (to resume backup operations after upgrade)
+ba_client_start_daemon: true
+
+# ============================================================================
+# Installation State
+# ============================================================================
+
+# Desired state of BA Client
+# For upgrade, use "present" - the role will auto-detect upgrade is needed
+ba_client_state: "present"
+
+# ============================================================================
+# SP Server Connection (Preserved During Upgrade)
+# ============================================================================
+
+# These settings are preserved during upgrade
+# Uncomment if you need to verify or update server connection details
+# sp_server_name: "PETASCALE-SP01"
+# sp_server_address: "192.168.1.100"
+# sp_server_port: "1500"
+# node_name: "ba-client-01"
+
+# ============================================================================
+# Advanced Settings (Optional)
+# ============================================================================
+
+  - s390x
+  - ppc64le
+
+# Additional installation options (uncomment if needed)
+# ba_client_install_options: ""
+# ba_client_config_file: "/opt/tivoli/tsm/client/ba/bin/dsm.opt"
+
+# ============================================================================
+# UPGRADE PROCESS NOTES
+# ============================================================================
+#
+# The BA Client upgrade process:
+# 1. Detects current installed version
+# 2. Validates target version is higher (prevents downgrade)
+# 3. Backs up configuration files (dsm.opt, dsm.sys)
+# 4. Backs up RPM packages to /opt/baClientPackagesBk
+# 5. Uninstalls current version
+# 6. Installs new version
+# 7. Restores configuration files
+# 8. Starts daemon (if ba_client_start_daemon: true)
+#
+# AUTOMATIC ROLLBACK:
+# If upgrade fails, the role automatically:
+# - Restores configuration files from backup
+# - Reinstalls previous version from backup
+# - Maintains system stability
+#
+# ============================================================================
+# UPGRADE CHECKLIST
+# ============================================================================
+#
+# Before running the upgrade:
+# ☐ Verify current BA Client version
+# ☐ Backup dsm.opt and dsm.sys configuration files
+# ☐ Verify new version package is on remote node at ba_client_package_path
+# ☐ Ensure sufficient disk space (at least 2GB free)
+# ☐ Review IBM release notes for the target version
+# ☐ Test upgrade in non-production environment first
+# ☐ Stop any running backup jobs
+# ☐ Notify users of scheduled maintenance
+# ☐ Verify node is registered with SP Server
+#
+# To run the upgrade:
+#   ansible-playbook playbooks/petascale_upgrade.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_upgrade=yes"
+#
+# To upgrade only this host:
+#   ansible-playbook playbooks/petascale_upgrade.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_upgrade=yes" \
+#     --limit ba-client-01
+#
+# To upgrade only BA Clients (all):
+#   ansible-playbook playbooks/petascale_upgrade.yml \
+#     -i playbooks/inventory/petascale.ini \
+#     -e "confirm_upgrade=yes" \
+#     --limit ba_clients
+#
+# ============================================================================
+# POST-UPGRADE VERIFICATION
+# ============================================================================
+#
+# After upgrade completes, verify:
+# ☐ Check BA Client version: rpm -q TIVsm-BA
+# ☐ Verify daemon is running: systemctl status dsmcad
+# ☐ Test backup: dsmc incremental
+# ☐ Check logs: /var/log/messages or journalctl -u dsmcad
+# ☐ Verify node can connect to SP Server
+# ☐ Run test restore if critical
+#
+# Configuration files location:
+# - dsm.opt: /opt/tivoli/tsm/client/ba/bin/dsm.opt
+# - dsm.sys: /opt/tivoli/tsm/client/ba/bin/dsm.sys
+#
+# Backup files (created during upgrade):
+# - dsm.opt.bk: /opt/tivoli/tsm/client/ba/bin/dsm.opt.bk
+# - dsm.sys.bk: /opt/tivoli/tsm/client/ba/bin/dsm.sys.bk
+# - Package backup: /opt/baClientPackagesBk/
+#
+# ============================================================================
+
+# Made with Bob
