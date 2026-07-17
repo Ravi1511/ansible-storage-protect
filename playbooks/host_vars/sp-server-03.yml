@@ -174,5 +174,3 @@ imcl_path: "/opt/IBM/InstallationManager/eclipse/tools/imcl"
 server_blueprint: false
 
 # Compatible architectures - removed, using role defaults or group_vars
-
-# Made with Bob
