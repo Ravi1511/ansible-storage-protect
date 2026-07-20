@@ -65,6 +65,7 @@
 # ----------------------------------------------------------------------------
 - name: Certificate import block (Multi-Server)
   when:
+    - cert_error_detected
     - sp_servers is defined
     - sp_servers | length > 0
   block:
@@ -81,8 +82,8 @@
         src: "/home/{{ tsm_user | default('tsminst1') }}/cert256.arm"
         dest: "/tmp/ansible_cert_{{ item.name }}.arm"
         flat: yes
-      loop: "{{ sp_servers }}"
-      delegate_to: "{{ item.inventory_name }}"
+      loop: "{{ sp_servers | default([]) }}"
+      delegate_to: "{{ item.inventory_name | default(inventory_hostname) }}"
       become: yes
       register: cert_fetch
       when: item.inventory_name is defined
