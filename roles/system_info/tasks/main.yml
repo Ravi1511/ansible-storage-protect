@@ -52,18 +52,6 @@
     architecture: "{{ ansible_architecture | default('unknown') }}"
   when: architecture is not defined
 
-- name: Collect Architecture Information (AIX)
-  ansible.builtin.command: uname -p
-  register: uname_arch_aix
-  changed_when: false
-  ignore_errors: true
-  when: detected_os_type == "AIX"
-
-- name: Set Architecture Info (AIX)
-  ansible.builtin.set_fact:
-    architecture: "{{ uname_arch_aix.stdout }}"
-  when: detected_os_type == "AIX" and uname_arch_aix.rc == 0
-
 - name: Set default architecture if detection failed
   ansible.builtin.set_fact:
     architecture: "unknown"
@@ -132,17 +120,6 @@
       mount_point: "{{ disk_info_aix.stdout.splitlines()[1].split()[6] }}"
   when: ansible_facts['os_family'] == "AIX" and disk_info_aix.rc == 0
 
-- name: Parse Disk Space Information for /opt (AIX)
-  ansible.builtin.set_fact:
-    disk_space:
-      filesystem: "{{ disk_info_aix.stdout.splitlines()[1].split()[0] }}"
-      size_mb: "{{ disk_info_aix.stdout.splitlines()[1].split()[1] | int }}"
-      used_mb: "{{ disk_info_aix.stdout.splitlines()[1].split()[2] | int }}"
-      available_mb: "{{ disk_info_aix.stdout.splitlines()[1].split()[2] | int }}"
-      use_percent: "{{ disk_info_aix.stdout.splitlines()[1].split()[3] }}"
-      mount_point: "{{ disk_info_aix.stdout.splitlines()[1].split()[6] }}"
-  when: detected_os_type == "AIX" and disk_info_aix.rc == 0
-
 - name: Set default disk space if detection failed
   ansible.builtin.set_fact:
     disk_space:
@@ -163,7 +140,7 @@
       Architecture: "{{ architecture | default('unknown') }}"
       OS Name: "{{ os_name }}"
       OS Version: "{{ os_version }}"
-      OS Type: "{{ detected_os_type }}"
+      OS Type: "{{ ansible_facts['os_family'] | default('Unknown') }}"
       Filesystem Disk Space:
         - Free Memory: "{{ disk_space.available_mb | default(0) }} MB"
       Java Version: "{{ java_version | default('Not installed') }}"
