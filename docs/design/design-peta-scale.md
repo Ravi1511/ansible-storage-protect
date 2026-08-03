@@ -1,10 +1,10 @@
-# IBM Storage Protect Petascale Solution - Ansible Automation Design Document
+# IBM Storage Protect — Petascale Deployment & Configuration Design Document
 
 ## Document Information
 
-- **Document Title**: Petascale Data Protection Solution Design
+- **Document Title**: Petascale Deployment & Configuration Ansible Automation Design
 - **Version**: 1.0
-- **Date**: 2026-04-01
+- **Date**: 2026-01-01
 - **Status**: Active
 - **Author**: IBM Storage Protect Ansible Team
 
@@ -12,2537 +12,1117 @@
 
 ## Table of Contents
 
-1. [Introduction](#introduction)
-2. [Document Scope](#document-scope)
-3. [Architecture Overview](#architecture-overview)
-4. [Petascale Characteristics](#petascale-characteristics)
-5. [Component Details](#component-details)
-6. [Lifecycle Management](#lifecycle-management)
-7. [Data Flow Diagrams](#data-flow-diagrams)
-8. [Configuration Management](#configuration-management)
-9. [Storage Architecture](#storage-architecture)
-10. [Performance & Scalability](#performance--scalability)
-11. [Security Considerations](#security-considerations)
-12. [High Availability & Disaster Recovery](#high-availability--disaster-recovery)
-13. [Monitoring & Operations](#monitoring--operations)
-14. [Testing Strategy](#testing-strategy)
-15. [Usage Examples](#usage-examples)
-16. [Troubleshooting Guide](#troubleshooting-guide)
-17. [References](#references)
+1. [Introduction](#1-introduction)
+2. [Document Scope](#2-document-scope)
+3. [Architecture Overview](#3-architecture-overview)
+4. [Component Details](#4-component-details)
+5. [Lifecycle Management](#5-lifecycle-management)
+6. [Configuration Management](#6-configuration-management)
+7. [Multi-Server Topology Design](#7-multi-server-topology-design)
+8. [Security Design](#8-security-design)
+9. [Error Handling & Idempotency](#9-error-handling--idempotency)
+10. [Performance & Scalability](#10-performance--scalability)
+11. [Usage Examples](#11-usage-examples)
+12. [Troubleshooting Design](#12-troubleshooting-design)
+13. [References](#13-references)
 
 ---
 
-## Introduction
+## 1. Introduction
 
 ### Purpose
 
-The Petascale Data Protection Solution provides comprehensive Ansible automation for deploying, managing, and operating IBM Storage Protect servers at petascale capacity (500+ TB). This design document describes the architecture, components, and workflows for automating the complete lifecycle of petascale Storage Protect deployments using Ansible.
+This document describes the design of the IBM Storage Protect Petascale Deployment & Configuration Ansible Automation. It covers the architecture, components, workflows, and design decisions for the three core playbooks:
 
-### What is Petascale?
+- `petascale_install.yml` — installs SP Server, HSM Client, and BA Client software
+- `petascale_configure.yml` — performs post-install configuration of all components
+- `petascale_uninstall.yml` — removes components with data preservation
 
-**Petascale** refers to data protection deployments capable of managing storage capacities in the range of 500 terabytes to multiple petabytes. These deployments require:
+The design supersedes earlier drafts and reflects the implementation in the `ansible-storage-protect` repository on the `petascale-clean` branch.
 
-- **Massive Storage Capacity**: 500+ TB of file storage
-- **High Performance**: Support for 1000+ concurrent client sessions
-- **Enterprise-Grade Hardware**: 32+ CPU cores, 128+ GB RAM
-- **Optimized Configuration**: Large-scale database and storage pool settings
-- **Advanced Features**: Replication, high availability, disaster recovery
+### What is the Petascale Automation?
 
-### Key Objectives
+The Petascale automation is an Ansible-based solution for deploying IBM Storage Protect in high-scale GPFS environments. It automates the full lifecycle — from OS-level dependency validation through SP Server database initialisation, GPFS policy bootstrap, HSM client filesystem registration, and SSL certificate management — across multiple target nodes simultaneously.
 
-1. **Automated Deployment**: Complete automation of petascale SP Server installation
-2. **Lifecycle Management**: Install, upgrade, and uninstall operations
-3. **Configuration Management**: Automated configuration of large-scale settings
-4. **Storage Orchestration**: Automated preparation of petascale storage infrastructure
-5. **Consistency**: Repeatable, reliable deployments across environments
-6. **Scalability**: Support for multi-site and distributed deployments
+### Design Goals
+
+| Goal | Description |
+|---|---|
+| **Idempotency** | Every task is safe to re-run; already-complete steps are skipped, not re-executed |
+| **Node separation** | SP Server and BA/HSM Client roles are enforced to run on separate inventory groups |
+| **Dependency validation** | Pre-flight checks catch missing prerequisites before any installation begins |
+| **Graceful failure** | Partial failures roll back changes on the affected node without disrupting other nodes |
+| **Multi-server scale** | Clients support distributing GPFS filesets across multiple SP Servers in a single run |
+| **Separation of concerns** | Install, configure, and uninstall are distinct playbooks with no overlap |
 
 ### Business Value
 
-- **Reduced Deployment Time**: Hours instead of days for petascale deployments
-- **Consistency**: Eliminate configuration drift and human errors
-- **Scalability**: Easily replicate deployments across multiple sites
-- **Operational Efficiency**: Simplified management of complex infrastructure
-- **Cost Optimization**: Reduced labor costs and faster time-to-value
-- **Risk Mitigation**: Validated, tested deployment procedures
+- **Reduced deployment time** — Hours instead of days for full SP + GPFS HSM deployments
+- **Consistency** — Eliminates configuration drift and human errors across many nodes
+- **Scalability** — Supports simultaneous deployment to tens of SP Servers and hundreds of BA/HSM clients
+- **Operational efficiency** — Post-install configuration (DB2 instance, GPFS policy, SSL) fully automated
+- **Risk mitigation** — Validated, tested deployment procedures with rollback on failure
 
 ---
 
-## Document Scope
+## 2. Document Scope
 
-### Supported Platforms
+### 2.1 Covered Lifecycle Operations
+
+| Operation | Playbook | Description |
+|---|---|---|
+| **Install** | `petascale_install.yml` | Fresh installation of SP Server, HSM Client, BA Client |
+| **Configure** | `petascale_configure.yml` | Post-install DB2/server/client configuration and GPFS setup |
+| **Uninstall** | `petascale_uninstall.yml` | Complete component removal with data preservation |
+| **Upgrade** | `petascale_upgrade.yml` | *(Future work — not yet production-ready)* |
+
+### 2.2 Supported Platforms
 
 #### Operating Systems
 
-| OS Family | Versions | Architecture |
-|-----------|----------|--------------|
-| Red Hat Enterprise Linux | 7.x, 8.x, 9.x | x86_64 |
-| SUSE Linux Enterprise Server | 12 SP5, 15 SPx | x86_64 |
-| Ubuntu Server | 18.04 LTS, 20.04 LTS, 22.04 LTS | x86_64 |
+| Component | OS | Architecture |
+|---|---|---|
+| SP Server | RHEL 7/8/9, SLES 12/15, Ubuntu 18.04/20.04/22.04 | x86_64 |
+| BA Client | Linux (above), AIX | x86_64, ppc64, ppc64le, s390x |
+| HSM Client | Linux (above), AIX | x86_64, ppc64le (GPFS only) |
 
 #### IBM Storage Protect Versions
 
-- IBM Storage Protect Server 8.1.23+
-- IBM Storage Protect Server 8.1.24+
-- IBM Storage Protect Server 8.1.25+
-- IBM Storage Protect Server 8.1.27+
+- SP Server 8.1.25+ through 8.2.x
+- BA Client 8.1.25+ through 8.2.x
+- HSM Client 8.1.25+ through 8.2.x
 
-### Lifecycle Operations
+### 2.3 Out of Scope
 
-This design covers the following lifecycle operations for petascale deployments:
-
-#### 1. Installation
-- Fresh installation of SP Server (large configuration)
-- Storage infrastructure preparation (500+ TB)
-- Initial server configuration
-- Blueprint-based deployment
-- Post-installation validation
-
-#### 2. Upgrade
-- Version upgrade from 8.1.x to 8.1.y
-- Pre-upgrade validation
-- Automated upgrade execution
-- Post-upgrade verification
-- Rollback procedures
-
-#### 3. Uninstallation
-- Complete server removal
-- Storage cleanup (optional)
-- Configuration cleanup
-- Verification of clean state
-
-#### 4. Configuration Management
-- Server parameter tuning
-- Storage pool configuration
-- Policy management
-- Schedule configuration
-- Performance optimization
-
-### Out of Scope
-
-The following items are not covered in this design document:
-
-- **Client Management**: BA Client installation (see [design-ba-client.md](design-ba-client.md))
-- **Storage Agent**: LAN-Free configuration (see [design-storage-agent.md](design-storage-agent.md))
-- **Operations Center**: OC setup (see [design-oc.md](design-oc.md))
-- **Application Protection**: DB2, SAP, Oracle backup configurations
-- **Cloud Integration**: Cloud storage tier configuration
-- **Container Deployments**: Kubernetes/OpenShift deployments
-- **Windows Platforms**: Windows Server deployments
+- Operations Center (OC) installation and configuration
+- Storage Agent (LAN-Free) configuration
+- Application protection (DB2, SAP, Oracle)
+- Cloud storage tier configuration
+- Container / Kubernetes deployments
+- Windows platform deployments
+- SP Server upgrade automation (planned future work)
 
 ---
 
-## Architecture Overview
+## 3. Architecture Overview
 
-### High-Level Architecture
+### 3.1 High-Level Architecture
 
-```mermaid
-graph TB
-    subgraph "Ansible Control Node"
-        User[Administrator/CI-CD]
-        AnsibleCLI[Ansible CLI]
-        Inventory[Petascale Inventory]
-        Playbooks[Playbooks]
-        Vault[Ansible Vault<br/>Encrypted Secrets]
-    end
-    
-    subgraph "Orchestration Layer"
-        Blueprint[sp_server_blueprint.yml<br/>Orchestrator]
-        InstallPB[sp_server_install_playbook.yml]
-        UpgradePB[sp_server_upgrade_playbook.yml]
-        UninstallPB[sp_server_uninstall_playbook.yml]
-        StoragePB[storage_prepare_playbook.yml]
-    end
-    
-    subgraph "Execution Layer"
-        SPInstallRole[sp_server_install Role]
-        StoragePrepRole[storage_prepare Role]
-        SPFactsRole[sp_server_facts Role]
-        
-        SPModule[sp_server.py Module]
-        SPConfigModule[sp_server_configure.py Module]
-        SPFactsModule[sp_server_facts.py Module]
-    end
-    
-    subgraph "Target Infrastructure - Petascale Server"
-        SPServer[SP Server Instance<br/>Large Configuration]
-        
-        subgraph "Storage Infrastructure"
-            DB[(Database<br/>4-4.05 TB)]
-            ActiveLog[(Active Log<br/>550-600 GB)]
-            ArchiveLog[(Archive Log<br/>4-4.05 TB)]
-            FileStorage[(File Storage<br/>500-500.05 TB)]
-            Backup[(Backup<br/>16-16.05 TB)]
-        end
-        
-        subgraph "System Resources"
-            CPU[32+ CPU Cores]
-            RAM[128+ GB RAM]
-            Network[10/25/40/100 GbE]
-        end
-    end
-    
-    User --> AnsibleCLI
-    AnsibleCLI --> Inventory
-    AnsibleCLI --> Playbooks
-    AnsibleCLI --> Vault
-    
-    Playbooks --> Blueprint
-    Blueprint --> InstallPB
-    Blueprint --> StoragePB
-    InstallPB --> UpgradePB
-    InstallPB --> UninstallPB
-    
-    InstallPB --> SPInstallRole
-    StoragePB --> StoragePrepRole
-    SPInstallRole --> SPFactsRole
-    
-    SPInstallRole --> SPModule
-    SPInstallRole --> SPConfigModule
-    SPFactsRole --> SPFactsModule
-    
-    SPModule --> SPServer
-    SPConfigModule --> SPServer
-    SPFactsModule --> SPServer
-    
-    SPServer --> DB
-    SPServer --> ActiveLog
-    SPServer --> ArchiveLog
-    SPServer --> FileStorage
-    SPServer --> Backup
-    
-    SPServer -.-> CPU
-    SPServer -.-> RAM
-    SPServer -.-> Network
-    
-    style Blueprint fill:#ffd700
-    style SPServer fill:#198038
-    style FileStorage fill:#ff6b6b
-    style CPU fill:#4ecdc4
-    style RAM fill:#4ecdc4
-    style Network fill:#4ecdc4
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    Ansible Control Node                       │
+│                                                              │
+│  Administrator / CI-CD                                       │
+│        │                                                     │
+│        ▼                                                     │
+│  ansible-playbook CLI ──► Inventory (petascale.ini)          │
+│                      ──► host_vars / group_vars              │
+│                      ──► Ansible Vault (credentials)         │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐     │
+│  │              Playbook Layer                          │     │
+│  │  petascale_install.yml                               │     │
+│  │  petascale_configure.yml                             │     │
+│  │  petascale_uninstall.yml                             │     │
+│  └────────────────────┬────────────────────────────────┘     │
+│                       │                                      │
+│  ┌────────────────────▼────────────────────────────────┐     │
+│  │               Role Layer                             │     │
+│  │  roles/sp_server_install/  roles/ba_client_install/  │     │
+│  │  roles/hsm_client_install/                           │     │
+│  └────────────────────┬────────────────────────────────┘     │
+└───────────────────────┼──────────────────────────────────────┘
+                        │ SSH
+        ┌───────────────┼─────────────────────────────┐
+        │               │                             │
+        ▼               ▼                             ▼
+┌──────────────┐ ┌──────────────┐             ┌──────────────┐
+│  SP Server   │ │  BA Client   │             │  HSM Client  │
+│  Node(s)     │ │  Node(s)     │     ...     │  Node(s)     │
+│              │ │              │             │              │
+│ dsmserv      │ │ dsmc         │             │ dsmmigfs     │
+│ DB2 instance │ │ dsm.sys      │             │ dsm.sys      │
+│ GPFS stgpool │ │ dsm.opt      │             │ dsm.opt      │
+│ port 1500    │ │ SSL cert     │             │ DMAPI        │
+└──────────────┘ └──────┬───────┘             └──────┬───────┘
+                        │ TCP 1500                   │ TCP 1500
+                        └─────────────┬──────────────┘
+                                      ▼
+                              SP Server port 1500
 ```
 
-### Layered Architecture
+### 3.2 Layered Architecture
 
-```mermaid
-graph TB
-    subgraph "Layer 1: User Interface"
-        CLI[Ansible CLI]
-        CICD[CI/CD Pipeline]
-        Tower[Ansible Tower/AWX]
-    end
-    
-    subgraph "Layer 2: Orchestration"
-        Blueprint[Blueprint Orchestrator]
-        StateManager[State Management]
-        Validator[Validation Logic]
-    end
-    
-    subgraph "Layer 3: Playbooks"
-        InstallPlaybook[Install Playbook]
-        UpgradePlaybook[Upgrade Playbook]
-        UninstallPlaybook[Uninstall Playbook]
-        StoragePlaybook[Storage Playbook]
-        ConfigPlaybook[Configure Playbook]
-    end
-    
-    subgraph "Layer 4: Roles"
-        InstallRole[sp_server_install]
-        StorageRole[storage_prepare]
-        FactsRole[sp_server_facts]
-    end
-    
-    subgraph "Layer 5: Modules"
-        ServerModule[sp_server.py]
-        ConfigModule[sp_server_configure.py]
-        FactsModule[sp_server_facts.py]
-    end
-    
-    subgraph "Layer 6: Module Utilities"
-        ServerUtils[sp_server_utils.py]
-        DsmadmcAdapter[dsmadmc_adapter.py]
-        SPUtils[sp_utils.py]
-        Constants[sp_server_constants.py]
-    end
-    
-    subgraph "Layer 7: Target Infrastructure"
-        Hosts[Petascale SP Servers]
-        Storage[Storage Systems]
-        Network[Network Infrastructure]
-    end
-    
-    CLI --> Blueprint
-    CICD --> Blueprint
-    Tower --> Blueprint
-    
-    Blueprint --> StateManager
-    Blueprint --> Validator
-    Blueprint --> InstallPlaybook
-    Blueprint --> StoragePlaybook
-    
-    InstallPlaybook --> InstallRole
-    UpgradePlaybook --> InstallRole
-    UninstallPlaybook --> InstallRole
-    StoragePlaybook --> StorageRole
-    ConfigPlaybook --> InstallRole
-    
-    InstallRole --> ServerModule
-    InstallRole --> ConfigModule
-    StorageRole --> StorageRole
-    FactsRole --> FactsModule
-    
-    ServerModule --> ServerUtils
-    ConfigModule --> DsmadmcAdapter
-    FactsModule --> SPUtils
-    ServerUtils --> Constants
-    
-    ServerUtils --> Hosts
-    DsmadmcAdapter --> Hosts
-    SPUtils --> Storage
-    
-    style Blueprint fill:#ffd700
-    style InstallRole fill:#ee538b
-    style ServerModule fill:#0f62fe
-    style Hosts fill:#198038
+```
+Layer 1 — User Interface
+    ansible-playbook CLI  │  CI/CD pipeline  │  Ansible Tower/AWX
+
+Layer 2 — Playbooks (Orchestration)
+    petascale_install.yml  │  petascale_configure.yml  │  petascale_uninstall.yml
+
+Layer 3 — Ansible Roles (Execution)
+    sp_server_install/   │   ba_client_install/   │   hsm_client_install/
+
+Layer 4 — Task Files (Implementation)
+    sp_server_install_linux.yml         ba_client_install_linux.yml
+    sp_server_prechecks_linux.yml       ba_client_uninstall_linux.yml
+    sp_server_configure_petascale.yml   ba_client_cert_fix.yml
+    sp_server_stop_services.yml         ba_client_auth_bootstrap.yml
+    sp_server_uninstall_linux.yml
+
+Layer 5 — Target Hosts
+    [sp_servers]   │   [ba_clients]   │   [hsm_clients]
 ```
 
-### Component Interaction Matrix
+### 3.3 Inventory Group Model
 
-| Component | Interacts With | Purpose |
-|-----------|----------------|---------|
-| **Blueprint Orchestrator** | Install/Storage/Configure Playbooks | Coordinates multi-phase deployment |
-| **Install Playbook** | sp_server_install Role | Manages server installation lifecycle |
-| **Upgrade Playbook** | sp_server_install Role | Handles version upgrades |
-| **Uninstall Playbook** | sp_server_install Role | Removes server installation |
-| **Storage Playbook** | storage_prepare Role | Prepares petascale storage |
-| **sp_server_install Role** | sp_server.py, sp_server_configure.py | Executes installation/configuration |
-| **storage_prepare Role** | System commands (LVM, filesystem) | Creates storage infrastructure |
-| **sp_server.py Module** | sp_server_utils.py, IBM IM | Installs/upgrades/uninstalls server |
-| **sp_server_configure.py** | dsmadmc_adapter.py | Configures server settings |
-| **dsmadmc_adapter.py** | dsmadmc CLI | Executes administrative commands |
+```
+petascale_infrastructure
+├── sp_servers          ← SP Server nodes (separate from clients, mandatory)
+├── ba_clients          ← BA Client nodes
+└── hsm_clients         ← HSM Client nodes (GPFS required)
+```
+
+Key constraint: **a host may appear in only one group**. SP Server and clients on the same node are explicitly unsupported due to incompatible GSKit versions (SP Server requires GSKit 8.0.55.x; clients require GSKit 8.0.60.x).
+
+### 3.4 Component Interaction Matrix
+
+| Initiator | Target | Mechanism | Purpose |
+|---|---|---|---|
+| `petascale_install.yml` | `sp_server_install` role | `import_role` / `include_role` | SP Server installation |
+| `petascale_install.yml` | `ba_client_install` role | `import_role` / `include_role` | BA Client installation |
+| `petascale_install.yml` | `hsm_client_install` role | `import_role` / `include_role` | HSM Client installation |
+| `petascale_configure.yml` | `sp_server_configure_petascale.yml` | task file include | SP Server post-install config |
+| `petascale_configure.yml` | `ba_client_cert_fix.yml` | task file include | SSL certificate import |
+| `petascale_configure.yml` | `ba_client_auth_bootstrap.yml` | task file include | Auth cache bootstrap |
+| `petascale_configure.yml` | SP Server (delegate_to) | `dsmadmc` CLI over SSH | GPFS policy, node registration |
+| `petascale_uninstall.yml` | `sp_server_uninstall_linux.yml` | task file include | SP Server removal |
+| `petascale_uninstall.yml` | `ba_client_install` role | `import_role` / `include_role` | BA/HSM Client removal |
+| BA/HSM Client | SP Server | TCP 1500 | Backup, migration, recall |
+| SP Server config | SP Server (localhost) | `dsmadmc` stdin pipe | DB format, admin registration |
 
 ---
 
-## Petascale Characteristics
+## 4. Component Details
 
-### What Makes It Petascale?
+### 4.1 Playbooks
 
-#### Storage Capacity
+#### `petascale_install.yml`
 
-The **large** configuration is designed for petascale deployments:
+**Purpose**: Orchestrates fresh installation of all three component types across their respective inventory groups.
 
-| Storage Component | Size Range | Purpose |
-|-------------------|------------|---------|
-| **Database** | 4-4.05 TB | Server database and metadata |
-| **Active Log** | 550-600 GB | Transaction logging (high performance) |
-| **Archive Log** | 4-4.05 TB | Archive log storage |
-| **File Storage** | 500-500.05 TB | Primary data storage (PETASCALE) |
-| **Backup** | 16-16.05 TB | Database backup storage |
-| **Total** | ~520+ TB | Complete storage infrastructure |
+**Plays (in order)**:
 
-#### Performance Characteristics
+| Play # | Hosts | Description |
+|---|---|---|
+| 1 | `all` | OS detection — sets `ansible_python_interpreter` for Linux or AIX |
+| 2 | `localhost` | Banner — prints targeted groups and records start time |
+| 3 | `all` | Python 3.9 pre-check — warns if absent, does not abort |
+| 4 | `sp_servers` | Pre-checks — validates `/tmp` mount options, permissions, disk space |
+| 5 | `sp_servers` | Installation — dependency validation, package discovery, SP Server install |
+| 6 | `ba_clients` | Installation — dependency validation, BA Client install |
+| 7 | `hsm_clients` | Installation — dependency validation, HSM Client install |
+| 8 | `localhost` | Summary report — elapsed time, per-node results |
 
-| Metric | Petascale (Large) | Standard (Medium) | Comparison |
-|--------|-------------------|-------------------|------------|
-| **Max Sessions** | 1000 | 500 | 2x capacity |
-| **Active Log Size** | 524,032 MB | 131,072 MB | 4x larger |
-| **DB Backup Streams** | 8+ | 4 | 2x parallelism |
-| **CPU Cores** | 32+ | 16+ | 2x processing |
-| **RAM** | 128+ GB | 64+ GB | 2x memory |
-| **Network** | 25/40/100 GbE | 10 GbE | 2.5-10x bandwidth |
+**Idempotency**: The install role checks whether the component is already installed via IBM Installation Manager (`imcl listInstalledPackages`) or RPM queries before proceeding. Already-installed nodes are added to an `already_installed` results list and skipped.
 
-#### Hardware Requirements
+**Safety gate for SP Server**: SP Server installation tasks are tagged `install`. The tag must be explicitly passed (`--tags install`) to permit SP Server installation. This prevents accidental re-installation in environments where clients are re-deployed independently.
 
-**Minimum Petascale Configuration:**
+#### `petascale_configure.yml`
 
-```yaml
-CPU:
-  cores: 32
-  architecture: x86_64
-  recommended: 48+ cores for optimal performance
+**Purpose**: Post-install configuration of all components. Does not install, upgrade, or remove software.
 
-Memory:
-  minimum: 128 GB
-  recommended: 256 GB
-  type: DDR4 ECC
+**Plays (in order)**:
 
-Storage:
-  database:
-    capacity: 4 TB
-    type: SSD/NVMe (high IOPS)
-    raid: RAID 10
-  active_log:
-    capacity: 600 GB
-    type: SSD/NVMe (ultra-high IOPS)
-    raid: RAID 1 or RAID 10
-  archive_log:
-    capacity: 4 TB
-    type: SSD/HDD hybrid
-    raid: RAID 5/6
-  file_storage:
-    capacity: 500 TB
-    type: High-capacity HDD/SSD
-    raid: RAID 6 or distributed storage
-  backup:
-    capacity: 16 TB
-    type: HDD
-    raid: RAID 5/6
+| Play # | Hosts | Description |
+|---|---|---|
+| 1 | `all` | OS detection |
+| 2 | `localhost` | Banner |
+| 3 | `all` | Python 3.9 check |
+| 4 | `sp_servers` | Pre-check — detects `sp_server_installed` fact via `imcl` |
+| 5 | `sp_servers` | Configure — skipped if `configure_servers=false` or not installed |
+| 6 | `ba_clients` | Configure — skipped if `configure_clients=false` |
+| 7 | `hsm_clients` | Configure — skipped if `configure_clients=false` |
+| 8 | `localhost` | Summary |
 
-Network:
-  primary: 25 GbE or higher
-  backup: 10 GbE (dedicated backup network)
-  management: 1 GbE
-  features:
-    - Jumbo frames (MTU 9000)
-    - QoS for backup traffic
-    - Link aggregation (LACP)
+**Runtime control variables**:
 
-Operating System:
-  - RHEL 8.x/9.x (recommended)
-  - SLES 15 SPx
-  - Ubuntu 22.04 LTS
-  - Kernel: 4.18+ (for performance features)
-```
+| Variable | Default | Effect |
+|---|---|---|
+| `configure_servers` | `true` | Set `false` to skip all SP Server plays |
+| `configure_clients` | `true` | Set `false` to skip all BA/HSM Client plays |
 
-### Sizing Comparison
+#### `petascale_uninstall.yml`
 
-```mermaid
-graph LR
-    subgraph "XSmall"
-        XS_Storage[10 TB]
-        XS_Sessions[75]
-        XS_CPU[8 cores]
-        XS_RAM[32 GB]
-    end
-    
-    subgraph "Small"
-        S_Storage[38 TB]
-        S_Sessions[250]
-        S_CPU[16 cores]
-        S_RAM[64 GB]
-    end
-    
-    subgraph "Medium"
-        M_Storage[180 TB]
-        M_Sessions[500]
-        M_CPU[16 cores]
-        M_RAM[64 GB]
-    end
-    
-    subgraph "Large - PETASCALE"
-        L_Storage[500+ TB]
-        L_Sessions[1000+]
-        L_CPU[32+ cores]
-        L_RAM[128+ GB]
-    end
-    
-    XS_Storage --> S_Storage
-    S_Storage --> M_Storage
-    M_Storage --> L_Storage
-    
-    style L_Storage fill:#ff6b6b
-    style L_Sessions fill:#ff6b6b
-    style L_CPU fill:#ff6b6b
-    style L_RAM fill:#ff6b6b
-```
+**Purpose**: Removes components. A dry run (no `confirm_uninstall`) prints what would be removed. Actual removal requires `-e "confirm_uninstall=yes"`.
+
+**Plays (in order)**:
+
+| Play # | Hosts | Description |
+|---|---|---|
+| 1 | `all` | OS detection |
+| 2 | `sp_servers` | Stop services (`dsmserv halt`, DB2 deactivate) |
+| 3 | `sp_servers` | Uninstall SP Server via IBM Installation Manager |
+| 4 | `ba_clients` | Stop `dsmcad.service`, terminate processes, uninstall RPMs |
+| 5 | `hsm_clients` | Stop HSM processes, uninstall RPMs |
+| 6 | `localhost` | Summary |
+
+**Data preservation**: Configuration files are backed up to `.bk` files. RPM packages are backed up to `/opt/*ClientPackagesBk`. SP Server database files, backup history, and node registrations are not touched.
 
 ---
 
-## Component Details
+### 4.2 Ansible Roles
 
-This section describes the components used in the Petascale solution. The Petascale deployment leverages **existing SP Server and BA Client modules and utilities** with large-scale configuration parameters. Only top-level playbooks are petascale-specific orchestrators.
+#### `roles/sp_server_install`
 
-### 1. Python Modules (Reused from SP Server)
+**Responsibilities**: SP Server installation and uninstallation on Linux.
 
-The Petascale solution uses existing SP Server modules without modification. These modules support petascale deployments through the `server_size='large'` parameter.
+**Key task files**:
 
-#### 1.1 sp_server.py (Installation Orchestrator)
+| File | Purpose |
+|---|---|
+| `tasks/main.yml` | Entry dispatcher — routes to install, configure, uninstall by state |
+| `tasks/sp_server_prechecks_linux.yml` | Validates Python, Java, lsof, rsync, `/tmp` mount, disk space |
+| `tasks/sp_server_install_linux.yml` | Discovers `.bin` package, runs IBM Installation Manager |
+| `tasks/sp_server_clean_config.yml` | Removes configuration artifacts on uninstall |
+| `tasks/sp_server_uninstall_linux.yml` | Stops processes, invokes IBM IM uninstall |
+| `tasks/sp_server_stop_services.yml` | Stops `dsmserv`, deactivates DB2 |
+| `tasks/sp_server_configuration_petascale.yml` | Post-install configuration (Phases 1–6, see §5.2) |
 
-**Purpose**: Main orchestration module for SP Server lifecycle management at petascale
+#### `roles/ba_client_install`
 
-**Location**: [`plugins/modules/sp_server.py`](../../plugins/modules/sp_server.py)
+**Responsibilities**: BA Client and HSM Client installation, uninstallation, and configuration on Linux and AIX.
 
-**Key Classes**:
-- [`BA_SERVER_SETUP`](plugins/modules/sp_server.py:195): Main orchestration class
+**Key task files**:
 
-**Key Methods**:
-- [`run(mode)`](plugins/modules/sp_server.py:207): Entry point for lifecycle operations
-- [`_install()`](plugins/modules/sp_server.py:222): Fresh installation workflow
-- [`_upgrade()`](plugins/modules/sp_server.py:261): Upgrade workflow
-- [`_uninstall()`](plugins/modules/sp_server.py:312): Uninstallation workflow
-- [`_deploy()`](plugins/modules/sp_server.py:352): Binary deployment and installation
-- [`_undeploy()`](plugins/modules/sp_server.py:480): Uninstallation execution
+| File | Purpose |
+|---|---|
+| `tasks/main.yml` | Entry dispatcher |
+| `tasks/ba_client_install_linux.yml` | Extracts `.tar`, runs RPM install |
+| `tasks/ba_client_uninstall_linux.yml` | Stops daemon, removes RPMs, backs up config |
+| `tasks/ba_client_cert_fix.yml` | Tests connection, imports SSL cert per SP Server |
+| `tasks/ba_client_auth_bootstrap.yml` | PASSWORDACCESS GENERATE bootstrap via `expect` |
 
-**Petascale Usage**:
-```yaml
-- name: Install SP Server with petascale configuration
-  ibm.storage_protect.sp_server:
-    state: present
-    version: "8.1.27.0"
-    server_size: "large"              # Petascale configuration
-    bin_repo: "/path/to/packages"
-    ssl_password: "{{ vault_ssl_password }}"
-```
+#### `roles/hsm_client_install`
 
-**Responsibilities**:
-- Artifact discovery and validation
-- Binary extraction and preparation
-- Response XML generation for large configuration
-- IBM Installation Manager interaction
-- Version comparison and upgrade logic
-- Rollback on failure
+**Responsibilities**: HSM Client installation and configuration. Extends the BA Client role with GPFS-specific steps.
 
-#### 1.2 sp_server_configure.py
+**Additional task files**:
 
-**Purpose**: Server configuration management with petascale-specific settings
+| File | Purpose |
+|---|---|
+| `tasks/hsm_client_install_linux.yml` | Extracts HSM `.tar`, installs HSM RPMs |
+| `tasks/hsm_client_configure.yml` | DMAPI enablement, filesystem registration, active server binding, DR docs, validation report |
 
-**Location**: [`plugins/modules/sp_server_configure.py`](../../plugins/modules/sp_server_configure.py)
+**Templates**:
 
-**Key Classes**:
-- [`SPServerConfiguration`](plugins/modules/sp_server_configure.py:23): Configuration orchestrator
-
-**Key Methods**:
-- [`prepare_storage()`](plugins/modules/sp_server_configure.py:147): Storage preparation
-- [`_ensure_directories()`](plugins/modules/sp_server_configure.py:99): Directory creation
-- [`_run_cmd()`](plugins/modules/sp_server_configure.py:63): Command execution wrapper
-
-**Petascale Configuration**:
-```yaml
-- name: Configure SP Server for petascale
-  ibm.storage_protect.sp_server_configure:
-    server_size: "large"
-    max_sessions: 1000                # Petascale: 1000+ sessions
-    dbbk_streams: 8                   # Petascale: 8 parallel streams
-    dbbk_compress: "YES"
-    act_log_size: 524032              # Petascale: ~512 GB
-```
-
-**Responsibilities**:
-- User and group creation
-- Directory structure setup
-- DB2 instance creation
-- Database formatting (4TB for petascale)
-- Server options configuration (1000+ sessions)
-- Administrative user setup
-- Petascale-specific parameter tuning
-
-#### 1.3 sp_server_facts.py
-
-**Purpose**: Gather server facts and status information for petascale deployments
-
-**Location**: [`plugins/modules/sp_server_facts.py`](../../plugins/modules/sp_server_facts.py)
-
-**Key Functions**:
-- [`main()`](plugins/modules/sp_server_facts.py:99): Module entry point
-
-**Supported Queries** (Petascale-relevant):
-- Server status and version
-- Monitor settings (1000+ sessions)
-- Database information (4TB capacity)
-- Database space utilization
-- Log information (600GB active log)
-- Storage pools (500+ TB capacity)
-- Device classes
-- Management classes
-- Replication rules
-
-**Petascale Facts Returned**:
-```python
-{
-    'sp_server_version': '8.1.27.0',
-    'sp_server_size': 'large',
-    'max_sessions': 1000,
-    'active_sessions': 450,
-    'database_size_gb': 3500,
-    'storage_capacity_tb': 520,
-    'file_storage_tb': 500
-}
-```
-
-#### 1.4 node.py
-
-**Purpose**: Client node registration and management for petascale deployments
-
-**Location**: [`plugins/modules/node.py`](../../plugins/modules/node.py)
-
-**Capabilities**:
-- Register new client nodes (hundreds to thousands)
-- Update node configuration
-- Deregister nodes
-- Associate schedules with nodes
-- Set node policies and options
-
-**Petascale Considerations**:
-- Supports bulk node registration
-- Handles high-volume client connections
-- Optimized for 1000+ concurrent sessions
-
-#### 1.5 schedule.py
-
-**Purpose**: Schedule management for petascale backup operations
-
-**Location**: [`plugins/modules/schedule.py`](../../plugins/modules/schedule.py)
-
-**Capabilities**:
-- Define backup schedules
-- Configure schedule timing
-- Set schedule actions (incremental, selective, archive)
-- Manage schedule lifecycle
-
-**Petascale Scheduling**:
-- Support for 8+ parallel backup streams
-- Optimized for high-throughput operations
-- Distributed backup windows
-
-#### 1.6 sp_baclient_install.py (BA Client Module)
-
-**Purpose**: Install BA clients on multiple nodes for petascale data protection
-
-**Location**: [`plugins/modules/sp_baclient_install.py`](../../plugins/modules/sp_baclient_install.py)
-
-**Key Classes**:
-- [`BAClientHelper`](plugins/module_utils/ba_client_utils.py:41): BA client installation helper
-
-**Capabilities**:
-- Install BA client on Linux and Windows
-- Configure client connection to petascale server
-- Register client nodes
-- Support for bulk client deployments
-
-**Petascale Usage**:
-```yaml
-- name: Install BA Client connecting to petascale server
-  ibm.storage_protect.sp_baclient_install:
-    state: present
-    version: "8.1.27.0"
-    package_source: "/path/to/ba_client"
-    tcpserveraddress: "petascale-sp-server.example.com"
-    tcpport: "1500"
-    nodename: "{{ inventory_hostname }}"
-```
-
-#### 1.7 HSM Client Module (Reuses BA Client Infrastructure)
-
-**Purpose**: Install and configure HSM (Hierarchical Storage Management) clients for petascale hierarchical data management
-
-**Location**: Uses [`plugins/modules/sp_baclient_install.py`](../../plugins/modules/sp_baclient_install.py) with HSM mode
-
-**Key Features**:
-- HSM client installation on Linux and Windows
-- Hierarchical storage policy configuration
-- Integration with BA client infrastructure
-- Support for co-existence with BA clients on same nodes
-
-**Petascale HSM Usage**:
-```yaml
-- name: Install HSM Client on petascale infrastructure
-  ibm.storage_protect.sp_baclient_install:
-    state: present
-    version: "8.1.27.0"
-    package_source: "/path/to/hsm_client"
-    tcpserveraddress: "petascale-sp-server.example.com"
-    tcpport: "1500"
-    nodename: "{{ inventory_hostname }}"
-    hsm_mode: true                        # Enable HSM functionality
-    hsm_policy: "PETASCALE_HSM_POLICY"
-```
-
-**HSM-Specific Capabilities**:
-- Automatic file migration based on policies
-- Hierarchical storage tier management
-- Transparent file recall from archive
-- Co-existence with BA client on same node
-- Support for thousands of HSM-managed files
-
-**Note**: HSM clients can be installed on the same nodes as BA clients. In the inventory, the `[hsm_clients]` group can reuse IP addresses from `[ba_clients]` group.
+| File | Purpose |
+|---|---|
+| `templates/hsm_active_binding_policy.j2` | Generates GPFS policy file for `mmapplypolicy` to set `dmapi.IBMServ` attribute |
 
 ---
 
-### 2. Module Utilities (Reused from SP Server and BA Client)
+### 4.3 Key Task File: `sp_server_configuration_petascale.yml`
 
-The Petascale solution leverages existing module utilities that support large-scale configurations.
+This is the most complex task file in the automation. It runs on `sp_servers` nodes and executes in six sequential phases:
 
-#### 2.1 sp_server_utils.py
-
-**Purpose**: Reusable utility functions for SP Server operations at any scale
-
-**Location**: [`plugins/module_utils/sp_server_utils.py`](../../plugins/module_utils/sp_server_utils.py)
-
-**Key Function Categories**:
-
-**OS Helpers**:
-- [`os_oskey()`](plugins/module_utils/sp_server_utils.py:75): OS detection and normalization
-- [`get_os_info()`](plugins/module_utils/sp_server_utils.py:122): Detailed OS information
-- [`get_system_info()`](plugins/module_utils/sp_server_utils.py:186): System resource information
-
-**File System Helpers**:
-- `fs_exists()`: Check file/directory existence
-- `fs_ensure_dir()`: Create directories
-- `fs_remove_tree()`: Remove directory trees
-- `fs_require_free_mb()`: Check available disk space (critical for 500+ TB)
-
-**Execution Helpers**:
-- `exec_run()`: Execute shell commands
-- `extract_binary_package()`: Extract installation binaries
-
-**Version Helpers**:
-- `version_parse()`: Parse version strings
-- `version_is_newer()`: Compare versions
-
-**BA Server Helpers**:
-- `ba_install_dir()`: Determine installation directory
-- `ba_is_installed()`: Check installation status
-- `find_installer()`: Locate installation artifacts
-
-**XML Helpers**:
-- [`AgentInputXMLBuilder`](plugins/module_utils/sp_server_utils.py:381): Generate installation response XML
-- `update_xml_value()`: Update XML configuration
-- `update_package_offering()`: Update package offerings in XML
-
-**Petascale Support**:
-- All utilities support large-scale configurations
-- No modifications needed for petascale deployments
-- Handles large storage validation (500+ TB)
-
-#### 2.2 sp_server_constants.py
-
-**Purpose**: Constants and metadata for SP Server components
-
-**Location**: [`plugins/module_utils/sp_server_constants.py`](../../plugins/module_utils/sp_server_constants.py)
-
-**Key Data Structures**:
-- [`offerings_metadata`](plugins/module_utils/sp_server_constants.py:31): Component metadata
-  - `server`: SP Server core
-  - `stagent`: Storage Agent
-  - `devices`: Device drivers
-  - `oc`: Operations Center
-  - `ossm`: Open Systems Storage Manager
-  - `license`: License component
-
-- [`preferences`](plugins/module_utils/sp_server_constants.py:70): Installation Manager preferences
-
-**Petascale Relevance**:
-- Defines large server size parameters
-- Contains petascale storage size definitions
-- Session limits for large configurations
-
-#### 2.3 sp_server_facts.py (Module Utils)
-
-**Purpose**: Parse and transform dsmadmc output for all server sizes
-
-**Location**: [`plugins/module_utils/sp_server_facts.py`](../../plugins/module_utils/sp_server_facts.py)
-
-**Key Classes**:
-- [`DsmadmcAdapterExtended`](plugins/module_utils/sp_server_facts.py:5): Extended adapter with comma-delimited support
-- [`DSMParser`](plugins/module_utils/sp_server_facts.py:35): Output parser
-- [`SpServerResponseMapper`](plugins/module_utils/sp_server_facts.py:298): Response transformation
-
-**Parser Methods**:
-- [`parse_q_status()`](plugins/module_utils/sp_server_facts.py:41): Parse status output
-- [`parse_q_db()`](plugins/module_utils/sp_server_facts.py:95): Parse database info (handles 4TB databases)
-- [`parse_q_stgpool()`](plugins/module_utils/sp_server_facts.py:273): Parse storage pool info (handles 500+ TB)
-- Additional parsers for various query types
-
-#### 2.4 dsmadmc_adapter.py
-
-**Purpose**: Base adapter for dsmadmc CLI interaction
-
-**Location**: [`plugins/module_utils/dsmadmc_adapter.py`](../../plugins/module_utils/dsmadmc_adapter.py)
-
-**Key Classes**:
-- [`DsmadmcAdapter`](plugins/module_utils/dsmadmc_adapter.py:9): Base adapter class
-
-**Key Methods**:
-- [`run_command()`](plugins/module_utils/dsmadmc_adapter.py:46): Execute dsmadmc commands
-- [`find_one()`](plugins/module_utils/dsmadmc_adapter.py:71): Query single object
-- [`perform_action()`](plugins/module_utils/dsmadmc_adapter.py:80): Perform CRUD operations
-
-**Authentication**:
-- Server name (env: `STORAGE_PROTECT_SERVERNAME`)
-- Username (env: `STORAGE_PROTECT_USERNAME`)
-- Password (env: `STORAGE_PROTECT_PASSWORD`)
-
-**Petascale Support**:
-- Handles high-volume command execution
-- Supports bulk operations for 1000+ sessions
-
-#### 2.5 ba_client_utils.py
-
-**Purpose**: BA Client installation and management utilities
-
-**Location**: [`plugins/module_utils/ba_client_utils.py`](../../plugins/module_utils/ba_client_utils.py)
-
-**Key Classes**:
-- [`BAClientHelper`](plugins/module_utils/ba_client_utils.py:41): BA client helper class
-
-**Key Methods**:
-- `check_installed()`: Check if BA client is installed
-- `is_newer_version()`: Compare versions
-- `verify_system_prereqs()`: Verify system prerequisites
-- `run_cmd()`: Execute commands
-
-**Petascale Support**:
-- Supports bulk client installations
-- Handles connections to petascale servers
-- Optimized for high-volume deployments
+| Phase | Steps |
+|---|---|
+| **1 — TSM user & group** | Create OS group `tsm_group` (GID `tsm_group_gid`), create OS user `tsm_user` (UID `tsm_user_uid`), set password, fix home directory ownership |
+| **2 — Directories & DB2 instance** | Create base/db/alog/archlog directories, fix `/opt/tivoli/tsm/db2` ownership, run `db2icrt -a server -u tsminst1 tsminst1` (skip if instance exists), configure `LD_LIBRARY_PATH` in `sqllib/userprofile` |
+| **3 — `dsmserv.opt`** | Copy `dsmserv.opt.smp` to base directory (first run only), update/add `commmethod`, `tcpport`, `ACTIVELOGSIZE`, `COMMTIMEOUT`, `DEDUPREQUIRESBACKUP`, `EXPINTERVAL`, validate disk space |
+| **4 — Database format & admin** | If dsmserv running: skip format, check admin exists. If not running: async `dsmserv format` (timeout configurable, default 1800 s), pipe `register admin`, `grant authority`, `halt`. Start server in background, poll TCP port until available |
+| **5 — Firewall** | Open `tcpport` (default 1500) in `firewalld` (runtime + permanent). Skipped if firewalld inactive |
+| **6 — GPFS policy bootstrap** | If `gpfs_policy_bootstrap_enabled: true`: `define stgpool`, `define stgpooldirectory`, `define domain`, `define policyset`, `define mgmtclass`, `define copygroup`, `assign defmgmtclass`, `validate policyset`, `activate policyset`. Register HSM client nodes via `register node`. Each step queries before acting — idempotent |
 
 ---
 
-### 3. Ansible Roles (Reused from SP Server and BA Client)
+### 4.4 Key Task File: `ba_client_cert_fix.yml`
 
-The Petascale solution uses existing roles with large configuration parameters.
+Handles SSL trust establishment between clients and SP Servers. Design:
 
-#### 3.1 sp_server_install
-
-**Purpose**: Complete SP Server installation, upgrade, and uninstallation at petascale
-
-**Location**: [`roles/sp_server_install/`](../../roles/sp_server_install/)
-
-**Main Tasks**: [`main.yml`](roles/sp_server_install/tasks/main.yml)
-
-**Task Files**:
-- [`sp_server_prechecks_linux.yml`](roles/sp_server_install/tasks/sp_server_prechecks_linux.yml): Pre-installation validation (32+ cores, 128+ GB RAM)
-- [`sp_server_install_linux.yml`](roles/sp_server_install/tasks/sp_server_install_linux.yml): Installation execution
-- [`sp_server_configuration_linux.yml`](roles/sp_server_install/tasks/sp_server_configuration_linux.yml): Post-install configuration
-- [`sp_server_postchecks_linux.yml`](roles/sp_server_install/tasks/sp_server_postchecks_linux.yml): Installation verification
-- [`sp_server_uninstall_linux.yml`](roles/sp_server_install/tasks/sp_server_uninstall_linux.yml): Uninstallation
-
-**Key Variables for Petascale**:
-```yaml
-sp_server_state: present              # present/absent/upgrade
-sp_server_version: "8.1.27.0"
-sp_server_bin_repo: "/path/to/packages"
-ssl_password: "{{ vault_ssl_password }}"
-tsm_user: "tsminst1"
-tsm_group: "tsmsrvrs"
-server_size: "large"                  # PETASCALE CONFIGURATION
-max_sessions: 1000                    # Petascale: 1000+ sessions
-act_log_size: 524032                  # Petascale: ~512 GB
-dbbk_streams: 8                       # Petascale: 8 parallel streams
+```
+Test connection with dsmadmc
+    │
+    ├── No error ──► Skip (cert already trusted)
+    │
+    └── ANS1695E / ANS1592E / ANS1593E detected
+            │
+            ├── Multi-server mode:
+            │     For each sp_server in sp_servers list:
+            │       delegate_to: {{ sp_server.inventory_name }}
+            │         fetch /home/tsminst1/cert256.arm → controller temp
+            │       copy to client → dsmcert -add -label SP01 -file cert256.arm
+            │
+            └── Single-server mode:
+                  openssl s_client → extract cert PEM
+                  dsmcert -add -label SP01 -file cert.pem
 ```
 
-**Petascale-Specific Behavior**:
-- Validates hardware meets petascale requirements (32+ cores, 128+ GB RAM)
-- Creates large database (4TB)
-- Configures large active log (600GB)
-- Sets up 1000+ session capacity
-- Optimizes for high-throughput operations
-
-#### 3.2 storage_prepare
-
-**Purpose**: Prepare petascale storage infrastructure (500+ TB)
-
-**Location**: [`roles/storage_prepare/`](../../roles/storage_prepare/)
-
-**Main Tasks**: [`main.yml`](roles/storage_prepare/tasks/main.yml)
-
-**Task Files**:
-- [`storage_prepare_linux.yml`](roles/storage_prepare/tasks/storage_prepare_linux.yml): Storage preparation
-- [`storage_cleanup_linux.yml`](roles/storage_prepare/tasks/storage_cleanup_linux.yml): Storage cleanup
-
-**Petascale Storage Configuration**:
-```yaml
-storage_prepare_size: "large"         # PETASCALE STORAGE
-instance_dir: "/tsminst1"
-clean_up: false
-
-# Storage sizes for petascale (in GB)
-storage_sizes:
-  large:
-    TSMdbspace: [4000, 4050]          # 4-4.05 TB
-    TSMalog: [550, 600]               # 550-600 GB
-    TSMarchlog: [4000, 4050]          # 4-4.05 TB
-    TSMfile: [500000, 500050]         # 500-500.05 TB (PETASCALE)
-    TSMbkup: [16000, 16050]           # 16-16.05 TB
-```
-
-**Operations**:
-1. Disk discovery and validation (500+ TB capacity)
-2. LVM volume group creation
-3. Logical volume creation (large sizes)
-4. Filesystem creation (ext4/xfs optimized for large files)
-5. Mount point configuration
-6. Permission setting
-7. Verification
-
-#### 3.3 sp_server_facts
-
-**Purpose**: Gather SP Server facts at any scale
-
-**Location**: [`roles/sp_server_facts/`](../../roles/sp_server_facts/)
-
-**Main Tasks**: [`main.yml`](roles/sp_server_facts/tasks/main.yml)
-
-**Usage**: Collects server information using [`sp_server_facts`](plugins/modules/sp_server_facts.py) module
-
-**Petascale Facts Collected**:
-- Server version and size
-- Session capacity and utilization (1000+ sessions)
-- Database size and utilization (4TB)
-- Storage pool capacity (500+ TB)
-- Performance metrics
-
-#### 3.4 nodes
-
-**Purpose**: Manage client nodes at scale
-
-**Location**: [`roles/nodes/`](../../roles/nodes/)
-
-**Main Tasks**: [`main.yml`](roles/nodes/tasks/main.yml)
-
-**Capabilities**:
-- Register, update, and deregister client nodes
-- Bulk node operations for petascale deployments
-- Support for hundreds to thousands of clients
-
-#### 3.5 schedules
-
-**Purpose**: Manage backup schedules for petascale operations
-
-**Location**: [`roles/schedules/`](../../roles/schedules/)
-
-**Main Tasks**: [`main.yml`](roles/schedules/tasks/main.yml)
-
-**Capabilities**:
-- Create and manage backup schedules
-- Configure parallel backup streams (8+)
-- Optimize for high-throughput operations
-
-#### 3.6 ba_client_install
-
-**Purpose**: Install BA clients on multiple nodes
-
-**Location**: [`roles/ba_client_install/`](../../roles/ba_client_install/)
-
-**Main Tasks**: [`main.yml`](roles/ba_client_install/tasks/main.yml)
-
-**Task Files**:
-- [`ba_client_install_linux.yml`](roles/ba_client_install/tasks/ba_client_install_linux.yml): Linux installation
-- [`ba_client_uninstall_linux.yml`](roles/ba_client_install/tasks/ba_client_uninstall_linux.yml): Linux uninstallation
-- [`ba_client_upgrade_linux.yml`](roles/ba_client_install/tasks/ba_client_upgrade_linux.yml): Linux upgrade
-
-**Petascale Usage**:
-- Supports bulk client installations (hundreds to thousands)
-- Connects clients to petascale SP servers
-- Handles high-volume parallel installations
-
-#### 3.7 hsm_client_install (Reuses BA Client Role)
-
-**Purpose**: Install and configure HSM clients for hierarchical storage management
-
-**Location**: Reuses [`roles/ba_client_install/`](../../roles/ba_client_install/) with HSM-specific configuration
-
-**Main Tasks**: Same as ba_client_install with HSM mode enabled
-
-**HSM-Specific Configuration**:
-- HSM client package installation
-- HSM policy configuration
-- Hierarchical storage tier setup
-- Integration with BA client infrastructure
-
-**Petascale HSM Usage**:
-- Can co-exist with BA clients on same nodes
-- Supports thousands of HSM-managed files
-- Optimized for automatic file migration
-- Transparent file recall from archive tiers
-
-**Note**: HSM clients are installed using the same `ba_client_install` role with `hsm_mode=true`. They can share the same physical nodes as BA clients (see Installation Workflow sequence diagram for details).
+**Key design decisions**:
+- Uses `delegate_to` on the SP Server play to fetch the certificate without requiring a separate connection credential
+- Detects error codes rather than always running to avoid certificate store pollution
+- Per-server certificate import in multi-server mode ensures all server trusts are established
 
 ---
 
-### 4. Playbooks (Reused with Petascale Configuration)
+## 5. Lifecycle Management
 
-The Petascale solution **reuses existing playbooks** from the SP Server collection, configured with `server_size='large'` and `storage_prepare_size='large'` parameters. No new playbooks are created.
-
-#### 4.1 petascale_install.yml (Blueprint Orchestrator)
-
-**File**: [`playbooks/petascale_install.yml`](../../playbooks/petascale_install.yml) (To be created)
-
-**Alternative Name**: `sp_server_blueprint.yml` (legacy reference)
-
-**Purpose**: Main orchestrator for complete petascale deployment across multiple SP servers, BA clients, and HSM clients.
-
-**Lifecycle Phases**: Install, Configure, Upgrade, Uninstall
-
-**Petascale Usage**:
-```yaml
----
-# Petascale Multi-Node Deployment
-- name: Install SP Servers with petascale configuration
-  import_playbook: sp_server_install_playbook.yml
-  vars:
-    target_hosts: sp_servers
-    server_size: "large"              # PETASCALE CONFIGURATION
-    sp_server_version: "8.1.27.0"
-    sp_server_state: "present"
-
-- name: Install BA clients
-  import_playbook: ba_client_install/playbooks/linux/ba_client_install_playbook.yml
-  vars:
-    target_hosts: ba_clients
-    ba_client_version: "8.1.27.0"
-
-- name: Install HSM clients (optional)
-  import_playbook: hsm_client_install_playbook.yml
-  vars:
-    target_hosts: hsm_clients         # Can reuse ba_clients IPs
-    ba_client_version: "8.1.27.0"
-    hsm_mode: true
-
-- name: Prepare 500+ TB storage
-  import_playbook: storage_prepare_playbook.yml
-  vars:
-    target_hosts: sp_servers
-    storage_prepare_size: "large"     # PETASCALE: 500+ TB
-
-- name: Configure petascale settings
-  import_playbook: sp_server_configure_playbook.yml
-  vars:
-    target_hosts: sp_servers
-    server_size: "large"
-    max_sessions: 1000
-    dbbk_streams: 8
-```
-
-**Referenced in**: Installation Workflow sequence diagram (line 1216)
-
-#### 4.2 sp_server_install_playbook.yml
-
-**File**: [`playbooks/sp_server_install_playbook.yml`](../../playbooks/sp_server_install_playbook.yml)
-
-**Purpose**: Install SP Server with petascale configuration
-
-**Lifecycle Phase**: **INSTALL**
-
-**Petascale Parameters**:
-```yaml
-sp_server_state: "present"
-sp_server_version: "8.1.27.0"
-server_size: "large"                  # PETASCALE
-sp_server_bin_repo: "/path/to/packages"
-max_sessions: 1000
-act_log_size: 524032                  # ~512 GB
-```
-
-**Operations**:
-1. Pre-installation validation (32+ cores, 128+ GB RAM)
-2. System compatibility checks
-3. Package installation via IBM Installation Manager
-4. Initial configuration with large server settings
-5. Service setup and startup
-6. Post-installation validation
-
-#### 4.3 sp_server_upgrade_playbook.yml
-
-**File**: [`playbooks/sp_server_upgrade_playbook.yml`](../../playbooks/sp_server_upgrade_playbook.yml)
-
-**Purpose**: Upgrade petascale SP Server
-
-**Lifecycle Phase**: **UPGRADE**
-
-**Petascale Parameters**:
-```yaml
-sp_server_state: "upgrade"
-sp_server_version: "8.1.27.0"
-server_size: "large"                  # Maintain petascale config
-```
-
-**Operations**:
-1. Pre-upgrade validation
-2. Backup current configuration
-3. Stop server services
-4. Upgrade packages
-5. Database migration (if needed)
-6. Restart services
-7. Post-upgrade validation
-
-#### 4.4 sp_server_uninstall_playbook.yml
-
-**File**: [`playbooks/sp_server_uninstall_playbook.yml`](../../playbooks/sp_server_uninstall_playbook.yml)
-
-**Purpose**: Remove petascale SP Server
-
-**Lifecycle Phase**: **UNINSTALL**
-
-**Petascale Parameters**:
-```yaml
-sp_server_state: "absent"
-clean_up: false                       # Optional: clean 500+ TB storage
-```
-
-**Operations**:
-1. Stop all services
-2. Backup configuration (optional)
-3. Uninstall packages
-4. Remove installation directories
-5. Clean up system configuration
-6. Storage cleanup (if clean_up=true)
-7. Verification
-
-#### 4.5 storage_prepare_playbook.yml
-
-**File**: [`playbooks/storage_prepare_playbook.yml`](../../playbooks/storage_prepare_playbook.yml)
-
-**Purpose**: Prepare petascale storage infrastructure (500+ TB)
-
-**Lifecycle Phase**: **INSTALL** (Pre-configuration)
-
-**Petascale Parameters**:
-```yaml
-storage_prepare_size: "large"         # PETASCALE: 500+ TB
-instance_dir: "/tsminst1"
-clean_up: false
-
-# Storage sizes (in GB)
-storage_sizes:
-  large:
-    TSMdbspace: [4000, 4050]          # 4-4.05 TB
-    TSMalog: [550, 600]               # 550-600 GB
-    TSMarchlog: [4000, 4050]          # 4-4.05 TB
-    TSMfile: [500000, 500050]         # 500-500.05 TB (PETASCALE)
-    TSMbkup: [16000, 16050]           # 16-16.05 TB
-```
-
-**Operations**:
-1. Disk discovery and validation (500+ TB capacity)
-2. LVM volume group creation
-3. Logical volume creation (large sizes)
-4. Filesystem creation (ext4/xfs optimized)
-5. Mount point configuration
-6. Permission setting
-7. Verification
-
-#### 4.6 sp_server_configure_playbook.yml
-
-**File**: [`playbooks/sp_server_configure_playbook.yml`](../../playbooks/sp_server_configure_playbook.yml)
-
-**Purpose**: Configure SP Server with petascale settings
-
-**Lifecycle Phase**: **CONFIGURE**
-
-**Petascale Parameters**:
-```yaml
-server_size: "large"
-max_sessions: 1000                    # Petascale: 1000+ sessions
-dbbk_streams: 8                       # Petascale: 8 parallel streams
-dbbk_compress: "YES"
-```
-
-**Configuration Areas**:
-1. Server parameters (1000+ sessions, large buffer pools)
-2. Storage pools (500+ TB capacity)
-3. Policy domains for petascale workloads
-4. Schedules (8+ parallel backup streams)
-5. Performance tuning
-6. Database backup configuration
-
-#### 4.7 ba_client_install_playbook.yml
-
-**File**: [`playbooks/ba_client_install/playbooks/linux/ba_client_install_playbook.yml`](../../playbooks/ba_client_install/playbooks/linux/ba_client_install_playbook.yml)
-
-**Purpose**: Install BA clients for petascale data protection
-
-**Lifecycle Phase**: **INSTALL** (Client deployment)
-
-**Petascale Parameters**:
-```yaml
-ba_client_version: "8.1.27.0"
-state: "present"
-target_hosts: "ba_clients"            # Hundreds to thousands of clients
-tcpserveraddress: "petascale-sp-server"
-tcpport: "1500"
-```
-
-**Scalability Considerations**:
-- Use `--forks 50-100` for parallel installation
-- Batch processing for 1000+ clients
-- Ensure adequate network bandwidth
-- Verify SP server can handle concurrent registrations (1000+ sessions)
-
-#### 4.8 ba_client_upgrade_playbook.yml
-
-**File**: [`playbooks/ba_client_upgrade_playbook.yml`](../../playbooks/ba_client_upgrade_playbook.yml) (To be created)
-
-**Purpose**: Upgrade BA clients to newer version
-
-**Lifecycle Phase**: **UPGRADE** (Client upgrade)
-
-**Petascale Parameters**:
-```yaml
-ba_client_version: "8.1.27.0"
-state: "upgrade"
-target_hosts: "ba_clients"
-```
-
-**Operations**:
-1. Query current BA client version
-2. Validate upgrade path
-3. Stop BA client services
-4. Upgrade packages
-5. Update configuration
-6. Restart services
-7. Verify connectivity to SP server
-
-**Referenced in**: Upgrade Workflow sequence diagram (line 1444)
-
-#### 4.9 ba_client_uninstall_playbook.yml
-
-**File**: [`playbooks/ba_client_install/playbooks/linux/ba_client_uninstall_playbook.yml`](../../playbooks/ba_client_install/playbooks/linux/ba_client_uninstall_playbook.yml)
-
-**Purpose**: Uninstall BA clients from nodes
-
-**Lifecycle Phase**: **UNINSTALL** (Client removal)
-
-**Petascale Parameters**:
-```yaml
-state: "absent"
-target_hosts: "ba_clients"
-backup_config: true                   # Optional: backup before removal
-```
-
-**Operations**:
-1. Backup configuration (optional)
-2. Stop BA client services
-3. Uninstall packages
-4. Remove installation directories
-5. Remove configuration files
-6. Verify removal
-
-**Referenced in**: Uninstall Workflow sequence diagram (line 1570)
-
-#### 4.10 hsm_client_install_playbook.yml
-
-**File**: [`playbooks/hsm_client_install_playbook.yml`](../../playbooks/hsm_client_install_playbook.yml) (To be created)
-
-**Purpose**: Install HSM clients for hierarchical storage management
-
-**Lifecycle Phase**: **INSTALL** (HSM client deployment)
-
-**Petascale Parameters**:
-```yaml
-ba_client_version: "8.1.27.0"
-state: "present"
-target_hosts: "hsm_clients"           # Can reuse ba_clients IPs
-hsm_mode: true
-hsm_policy: "PETASCALE_HSM_POLICY"
-tcpserveraddress: "petascale-sp-server"
-```
-
-**HSM-Specific Configuration**:
-- Hierarchical storage policies
-- File migration thresholds
-- Recall priorities
-- Co-existence with BA clients
-
-**Note**: HSM clients can be installed on the same nodes as BA clients. The inventory `[hsm_clients]` group can reuse IP addresses from `[ba_clients]` group.
-
-**Referenced in**: Installation Workflow sequence diagram (line 1262)
-
-#### 4.11 hsm_client_upgrade_playbook.yml
-
-**File**: [`playbooks/hsm_client_upgrade_playbook.yml`](../../playbooks/hsm_client_upgrade_playbook.yml) (To be created)
-
-**Purpose**: Upgrade HSM clients to newer version
-
-**Lifecycle Phase**: **UPGRADE** (HSM client upgrade)
-
-**Petascale Parameters**:
-```yaml
-ba_client_version: "8.1.27.0"
-state: "upgrade"
-target_hosts: "hsm_clients"
-hsm_mode: true
-```
-
-**Operations**:
-1. Upgrade HSM client components
-2. Update HSM configuration
-3. Restart HSM services
-4. Verify HSM functionality
-
-**Referenced in**: Upgrade Workflow sequence diagram (line 1463)
-
-#### 4.12 hsm_client_uninstall_playbook.yml
-
-**File**: [`playbooks/hsm_client_uninstall_playbook.yml`](../../playbooks/hsm_client_uninstall_playbook.yml) (To be created)
-
-**Purpose**: Uninstall HSM clients from nodes
-
-**Lifecycle Phase**: **UNINSTALL** (HSM client removal)
-
-**Petascale Parameters**:
-```yaml
-state: "absent"
-target_hosts: "hsm_clients"
-hsm_mode: true
-backup_config: true                   # Optional
-```
-
-**Operations**:
-1. Backup HSM configuration (optional)
-2. Stop HSM services
-3. Uninstall HSM components
-4. Remove HSM configuration
-5. Verify removal
-
-**Note**: Uninstalling HSM does not remove the underlying BA client. HSM is an additional layer on top of BA client.
-
-**Referenced in**: Uninstall Workflow sequence diagram (line 1542)
-
----
-
-### 5. Component Interaction Flow
-
-**Note**: These flows represent simplified single-node operations. For complete multi-node workflows with parallel execution and HSM clients, see the detailed sequence diagrams in the Lifecycle Management section (lines 1190-1711).
-
-#### Install Phase Flow (Single Node)
-
-```
-User → Blueprint Orchestrator (petascale_install.yml)
-  ↓
-Phase 1a: SP Server Installation (Parallel across [sp_servers])
-  ↓
-Install Playbook (server_size=large) → sp_server_install Role
-  ↓
-sp_server.py Module → sp_server_utils.py
-  ↓
-Validate Hardware (32+ cores, 128+ GB) → Extract Binaries → Install SP Server (large)
-  ↓
-Phase 1b: BA Client Installation (Parallel across [ba_clients])
-  ↓
-ba_client_install_playbook.yml → ba_client_install Role
-  ↓
-sp_baclient_install.py → ba_client_utils.py → Install & Register BA Clients
-  ↓
-Phase 1c: HSM Client Installation (Optional, Parallel across [hsm_clients])
-  ↓
-hsm_client_install_playbook.yml → ba_client_install Role (hsm_mode=true)
-  ↓
-sp_baclient_install.py (HSM mode) → Install & Configure HSM Clients
-  ↓
-Phase 2: Storage Preparation (Parallel across [sp_servers])
-  ↓
-Storage Playbook (storage_prepare_size=large) → storage_prepare Role
-  ↓
-Create LVM (500+ TB) → Mount Filesystems
-  ↓
-Phase 3: SP Server Configuration (Parallel across [sp_servers])
-  ↓
-Configure Playbook (max_sessions=1000) → sp_server_configure.py
-  ↓
-dsmadmc_adapter.py → Apply Petascale Config (Storage Pools, Policies, Schedules)
-  ↓
-Petascale Multi-Node Deployment Complete
-```
-
-**Multi-Node Considerations**:
-- Each phase processes multiple nodes in parallel (controlled by `--forks`)
-- Inventory groups: `[sp_servers]`, `[ba_clients]`, `[hsm_clients]`
-- HSM clients can co-exist with BA clients on same nodes
-- See Installation Workflow sequence diagram (lines 1192-1376) for detailed multi-node flow
-
-#### Upgrade Phase Flow (Multi-Node)
-
-```
-User → Upgrade Playbooks (Sequential phases)
-  ↓
-Phase 1: SP Server Upgrade (Parallel across [sp_servers])
-  ↓
-sp_server_upgrade_playbook.yml → sp_server_install Role → sp_server.py Module
-  ↓
-Check Version → Backup Config → Stop Services → Upgrade Packages → Start Services
-  ↓
-Phase 2: BA Client Upgrade (Parallel across [ba_clients])
-  ↓
-ba_client_upgrade_playbook.yml → ba_client_install Role
-  ↓
-Upgrade BA Client Packages → Update Configuration → Restart Services
-  ↓
-Phase 3: HSM Client Upgrade (Optional, Parallel across [hsm_clients])
-  ↓
-hsm_client_upgrade_playbook.yml → ba_client_install Role (hsm_mode=true)
-  ↓
-Upgrade HSM Components → Update HSM Configuration → Restart HSM Services
-  ↓
-Multi-Node Upgrade Complete (Petascale config maintained)
-```
-
-**Multi-Node Considerations**:
-- Servers upgraded first, then clients
-- Each phase waits for all nodes to complete
-- See Upgrade Workflow sequence diagram (lines 1377-1518) for detailed multi-node flow
-
-#### Uninstall Phase Flow (Multi-Node)
-
-```
-User → Uninstall Playbooks (Reverse order)
-  ↓
-Phase 1: HSM Client Uninstall (Optional, Parallel across [hsm_clients])
-  ↓
-hsm_client_uninstall_playbook.yml → Remove HSM Components
-  ↓
-Phase 2: BA Client Uninstall (Parallel across [ba_clients])
-  ↓
-ba_client_uninstall_playbook.yml → ba_client_install Role
-  ↓
-Stop Services → Uninstall Packages → Remove Directories
-  ↓
-Phase 3: SP Server Uninstall (Parallel across [sp_servers])
-  ↓
-sp_server_uninstall_playbook.yml → sp_server_install Role → sp_server.py Module
-  ↓
-Stop Services → Uninstall Packages → Remove Directories
-  ↓
-Phase 4: Storage Cleanup (Optional, Parallel across [sp_servers])
-  ↓
-storage_cleanup_playbook.yml → storage_prepare Role → Remove 500+ TB Volumes
-  ↓
-Multi-Node Uninstall Complete
-```
-
-**Multi-Node Considerations**:
-- Clients uninstalled first (HSM, then BA), then servers
-- Storage cleanup is optional and separate
-- See Uninstall Workflow sequence diagram (lines 1519-1711) for detailed multi-node flow
-
----
-
-### 6. Summary
-
-**Petascale Solution Architecture**:
-
-1. **Reuses ALL existing SP Server, BA Client, and HSM Client components**
-   - **Python modules** (Section 1, lines 456-665):
-     - sp_server.py, sp_server_configure.py, sp_server_facts.py, node.py, schedule.py
-     - sp_baclient_install.py (supports both BA and HSM modes)
-   - **Module utilities** (Section 2, lines 667-796):
-     - sp_server_utils.py, sp_server_constants.py, dsmadmc_adapter.py, ba_client_utils.py, sp_server_facts.py
-   - **Ansible roles** (Section 3, lines 797-952):
-     - sp_server_install, storage_prepare, sp_server_facts, nodes, schedules
-     - ba_client_install (supports both BA and HSM clients)
-     - hsm_client_install (reuses ba_client_install with hsm_mode=true)
-   - **Playbooks** (Section 4, lines 954-1293):
-     - **Blueprint**: petascale_install.yml (main orchestrator)
-     - **SP Server**: sp_server_install_playbook.yml, sp_server_upgrade_playbook.yml, sp_server_uninstall_playbook.yml
-     - **Storage**: storage_prepare_playbook.yml, storage_cleanup_playbook.yml
-     - **Configuration**: sp_server_configure_playbook.yml
-     - **BA Client**: ba_client_install_playbook.yml, ba_client_upgrade_playbook.yml, ba_client_uninstall_playbook.yml
-     - **HSM Client**: hsm_client_install_playbook.yml, hsm_client_upgrade_playbook.yml, hsm_client_uninstall_playbook.yml
-
-2. **No new petascale-specific modules or roles created**
-   - Petascale is a **deployment pattern**, not new code
-   - Achieved through configuration parameters
-   - HSM functionality reuses BA client infrastructure with hsm_mode flag
-
-3. **Petascale configuration parameters**:
-   - `server_size: "large"` → 1000+ sessions, 4TB database, 600GB active log
-   - `storage_prepare_size: "large"` → 500+ TB file storage
-   - `max_sessions: 1000` → Support for 1000+ concurrent client sessions
-   - `dbbk_streams: 8` → 8 parallel database backup streams
-   - `hsm_mode: true` → Enable hierarchical storage management
-   - Hardware requirements: 32+ cores, 128+ GB RAM
-
-4. **All lifecycle phases supported** (See Component Interaction Flow, lines 1295-1409):
-   - **Install**: Fresh petascale server installation with large configuration
-     - Multi-node: SP Servers → BA Clients → HSM Clients (optional) → Storage → Configuration
-     - See Installation Workflow sequence diagram (lines 1452-1636)
-   - **Upgrade**: Version upgrades maintaining large configuration
-     - Multi-node: SP Servers → BA Clients → HSM Clients (optional)
-     - See Upgrade Workflow sequence diagram (lines 1638-1778)
-   - **Uninstall**: Complete removal with optional 500+ TB storage cleanup
-     - Multi-node: HSM Clients (optional) → BA Clients → SP Servers → Storage Cleanup (optional)
-     - See Uninstall Workflow sequence diagram (lines 1780-1972)
-
-5. **Multi-node deployment with HSM support**:
-   - Inventory-based deployment to multiple SP servers, BA clients, and HSM clients
-   - HSM clients can co-exist with BA clients on same nodes (reuse IPs in inventory)
-   - Parallel execution via Ansible forks (--forks 10-100)
-   - Scalable to hundreds of servers and thousands of clients
-   - See detailed sequence diagrams in Lifecycle Management section (lines 1448-1972)
-
-6. **Component-to-Sequence Diagram Cross-References**:
-   - Blueprint Orchestrator (line 958) → Installation Workflow (line 1476)
-   - BA Client Playbooks (lines 1129-1211) → Referenced in all workflow diagrams
-   - HSM Client Playbooks (lines 1213-1293) → Installation (line 1522), Upgrade (line 1723), Uninstall (line 1802)
-   - Component Interaction Flow (lines 1295-1409) → Links to detailed sequence diagrams
-
-**Key Takeaway**: Petascale is achieved by using existing, proven SP Server and BA Client automation with large-scale configuration parameters. HSM functionality is seamlessly integrated using the same infrastructure. No custom petascale code is required.
-
----
-
-
-## Lifecycle Management
-
-### Installation Workflow
-
-#### Complete Installation Flow (Multi-Node)
-
-**Overview**: The installation workflow processes multiple SP servers and BA clients in parallel through Ansible's inventory-based looping mechanism.
+### 5.1 Installation Workflow
 
 ```mermaid
 sequenceDiagram
     participant Admin
-    participant Inventory as Inventory File<br/>[sp_servers]<br/>[ba_clients]<br/>[hsm_clients]
-    participant Blueprint as Blueprint Orchestrator
-    participant InstallPB as SP Install Playbook
-    participant StoragePB as Storage Playbook
-    participant ConfigPB as Configure Playbook
-    participant BAClientPB as BA Client Playbook
-    participant HSMClientPB as HSM Client Playbook
-    participant Role as Ansible Role
-    participant Module as Ansible Module
-    participant SPServers as SP Servers<br/>(sp-server-01, 02, 03, ...)
-    participant BAClients as BA Clients<br/>(client-01, 02, 03, ...)
-    participant HSMClients as HSM Clients<br/>(hsm-01, 02, 03, ...)
+    participant CtrlNode as Control Node
+    participant SPNode as SP Server Node(s)
+    participant BANode as BA Client Node(s)
+    participant HSMNode as HSM Client Node(s)
 
-    Admin->>Admin: 1. Setup SSH key authentication
-    Admin->>Inventory: 2. Create inventory with multiple nodes
-    Note over Inventory: [sp_servers]<br/>sp-server-01, 02, 03, ...<br/><br/>[ba_clients]<br/>client-01, 02, 03, ...<br/><br/>[hsm_clients] (optional)<br/>client-01, 02, ...<br/>(can reuse ba_client IPs)
-    
-    Admin->>Blueprint: 3. ansible-playbook petascale_install.yml
+    Admin->>CtrlNode: ansible-playbook petascale_install.yml --tags install
 
-    Note over Blueprint,HSMClients: Phase 1a: SP Server Installation
-    Blueprint->>InstallPB: Execute with target_hosts=sp_servers
-    
-    loop For each host in [sp_servers] group (parallel execution)
-        InstallPB->>Role: Invoke sp_server_install role
-        Role->>SPServers: Pre-checks (OS, hardware, disk)
-        SPServers-->>Role: Validation passed
-        
-        Role->>Module: Call sp_server.py (state=present)
-        Module->>SPServers: Create user/group (tsminst1)
-        Module->>SPServers: Install IBM Installation Manager
-        Module->>SPServers: Install SP Server packages
-        Module->>SPServers: Initialize server instance
-        SPServers-->>Module: Installation complete
-        Module-->>Role: Success
-        
-        Role->>SPServers: Post-checks (service, connectivity)
-        SPServers-->>Role: Verification passed
-    end
-    
-    InstallPB-->>Blueprint: All SP servers installed
-    
-    Note over Blueprint,HSMClients: Phase 1b: BA Client Installation
-    Blueprint->>BAClientPB: Execute with target_hosts=ba_clients
-    
-    loop For each host in [ba_clients] group (parallel execution)
-        BAClientPB->>Role: Invoke ba_client_install role
-        Role->>BAClients: Pre-checks (OS, disk space)
-        BAClients-->>Role: Validation passed
-        
-        Role->>Module: Call sp_baclient_install.py
-        Module->>BAClients: Install BA client packages
-        Module->>BAClients: Configure dsm.sys, dsm.opt
-        Module->>BAClients: Register node with SP server
-        BAClients-->>Module: Installation complete
-        Module-->>Role: Success
-        
-        Role->>BAClients: Post-checks (connectivity test)
-        BAClients-->>Role: Verification passed
-    end
-    
-    BAClientPB-->>Blueprint: All BA clients installed
-    
-    Note over Blueprint,HSMClients: Phase 1c: HSM Client Installation
-    Blueprint->>HSMClientPB: Execute with target_hosts=hsm_clients
-    
-    loop For each host in [hsm_clients] group (parallel execution)
-        HSMClientPB->>Role: Invoke hsm_client_install role
-        Role->>HSMClients: Pre-checks (OS, disk space)
-        HSMClients-->>Role: Validation passed
-        
-        Role->>Module: Call sp_baclient_install.py (HSM mode)
-        Module->>HSMClients: Install HSM client packages
-        Module->>HSMClients: Configure dsm.sys for HSM
-        Module->>HSMClients: Configure HSM policies
-        Module->>HSMClients: Register HSM node with SP server
-        HSMClients-->>Module: Installation complete
-        Module-->>Role: Success
-        
-        Role->>HSMClients: Post-checks (HSM connectivity test)
-        HSMClients-->>Role: Verification passed
-    end
-    
-    HSMClientPB-->>Blueprint: All HSM clients installed
-    
-    Note over Blueprint,HSMClients: Phase 2: Storage Preparation (500+ TB)
-    Blueprint->>StoragePB: Execute with target_hosts=sp_servers
-    
-    loop For each host in [sp_servers] group (parallel execution)
-        StoragePB->>Role: Invoke storage_prepare role
-        Role->>SPServers: Discover disks
-        Role->>SPServers: Create volume groups (large)
-        Role->>SPServers: Create logical volumes (500+ TB)
-        Role->>SPServers: Create filesystems (ext4/xfs)
-        Role->>SPServers: Mount filesystems
-        Role->>SPServers: Set permissions
-        SPServers-->>Role: Storage ready
-    end
-    
-    StoragePB-->>Blueprint: All storage prepared
-    
-    Note over Blueprint,BAClients: Phase 3: SP Server Configuration
-    Blueprint->>ConfigPB: Execute with target_hosts=sp_servers
-    
-    loop For each host in [sp_servers] group (parallel execution)
-        ConfigPB->>Role: Invoke sp_server_install role
-        Role->>Module: Call sp_server_configure.py
-        Module->>SPServers: Configure server (large settings)
-        Module->>SPServers: Create storage pools (petascale)
-        Module->>SPServers: Define policies
-        Module->>SPServers: Create schedules
-        Module->>SPServers: Tune performance parameters
-        SPServers-->>Module: Configuration applied
-        Module-->>Role: Success
-        
-        Role->>SPServers: Final validation
-        SPServers-->>Role: All checks passed
-    end
-    
-    ConfigPB-->>Blueprint: All servers configured
-    
-    Blueprint-->>Admin: ✅ Petascale deployment complete<br/>All SP Servers + BA Clients + HSM Clients ready
+    Note over CtrlNode,HSMNode: Play 1-3: OS detection & Python check (all nodes, parallel)
+    CtrlNode->>SPNode: Detect OS, check Python 3.9
+    CtrlNode->>BANode: Detect OS, check Python 3.9
+    CtrlNode->>HSMNode: Detect OS, check Python 3.9
 
+    Note over CtrlNode,SPNode: Play 4: SP Server pre-checks
+    CtrlNode->>SPNode: Validate /tmp mount, permissions, disk space
+    SPNode-->>CtrlNode: Pre-checks passed
+
+    Note over CtrlNode,SPNode: Play 5: SP Server installation (parallel)
+    loop For each sp_server host
+        CtrlNode->>SPNode: Dependency validation (Python, Java, lsof, rsync)
+        CtrlNode->>SPNode: Check already installed (imcl listInstalledPackages)
+        SPNode-->>CtrlNode: Not installed
+        CtrlNode->>SPNode: Locate .bin package in /tmp
+        CtrlNode->>SPNode: Run IBM Installation Manager
+        SPNode-->>CtrlNode: Installation complete
+        CtrlNode->>SPNode: Post-install verification
+    end
+
+    Note over CtrlNode,BANode: Play 6: BA Client installation (parallel)
+    loop For each ba_client host
+        CtrlNode->>BANode: Dependency validation
+        CtrlNode->>BANode: Check already installed (rpm -q TIVsm-BA)
+        CtrlNode->>BANode: Extract .tar, install RPMs
+        BANode-->>CtrlNode: Installation complete
+    end
+
+    Note over CtrlNode,HSMNode: Play 7: HSM Client installation (parallel)
+    loop For each hsm_client host
+        CtrlNode->>HSMNode: Dependency validation
+        CtrlNode->>HSMNode: Check already installed (rpm -q TIVsm-HSM)
+        CtrlNode->>HSMNode: Extract .tar, install HSM RPMs
+        HSMNode-->>CtrlNode: Installation complete
+    end
+
+    CtrlNode->>Admin: Summary: already_installed / installed / failed per host
 ```
 
-#### Key Points About Multi-Node Installation
-
-1. **Inventory-Based Looping**:
-   - Each playbook uses `hosts: "{{ target_hosts }}"` which references an inventory group
-   - Ansible automatically iterates through all hosts in the group
-   - No explicit loop construct needed in the playbook
-
-2. **Parallel Execution**:
-   - Multiple servers/clients are processed simultaneously
-   - Controlled by `--forks` parameter (default: 5, recommended: 10-100 for petascale)
-   - Each host maintains independent state
-
-3. **Phase Completion**:
-   - Each phase waits for ALL hosts to complete before moving to next phase
-   - If any host fails, the entire phase can be configured to stop (via `any_errors_fatal`)
-
-4. **Inventory Example**:
-   ```ini
-   [sp_servers]
-   sp-server-01 ansible_host=192.168.1.100
-   sp-server-02 ansible_host=192.168.1.101
-   sp-server-03 ansible_host=192.168.1.102
-   
-   [ba_clients]
-   client-01 ansible_host=192.168.2.10
-   client-02 ansible_host=192.168.2.11
-   client-03 ansible_host=192.168.2.12
-   # ... up to thousands of clients
-   
-   [hsm_clients]
-   # HSM clients can co-exist with BA clients on same nodes (optional)
-   # Reusing IPs from ba_clients - HSM is installed alongside BA client
-   client-01 ansible_host=192.168.2.10
-   client-02 ansible_host=192.168.2.11
-   # Note: client-03 does not have HSM enabled
-   # ... subset of ba_clients that need HSM functionality
-   ```
-
-5. **HSM Client Co-existence**:
-   - HSM clients can co-exist with BA clients on the same nodes
-   - HSM is optional - only needed for hierarchical storage management
-   - In inventory, [hsm_clients] can reuse IPs from [ba_clients]
-   - Example: If you have 3 BA clients, 2 of them can also be HSM clients
-   - HSM installation adds HSM functionality to existing BA client nodes
-
-6. **Execution Command**:
-   ```bash
-   # Deploy to all nodes (3 servers + N BA clients + M HSM clients)
-   # Note: HSM clients can share IPs with BA clients
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/petascale_install.yml \
-     --forks 20
-   ```
-
-### Upgrade Workflow (Multi-Node)
-
-**Overview**: The upgrade workflow processes multiple SP servers and clients in parallel through inventory-based looping.
+### 5.2 Configuration Workflow
 
 ```mermaid
 sequenceDiagram
     participant Admin
-    participant Inventory as Inventory File<br/>[sp_servers]<br/>[ba_clients]<br/>[hsm_clients]
-    participant UpgradePB as Upgrade Playbook
-    participant BAUpgradePB as BA Client Upgrade Playbook
-    participant HSMUpgradePB as HSM Client Upgrade Playbook
-    participant Role as Ansible Role
-    participant Module as Ansible Module
-    participant SPServers as SP Servers<br/>(sp-server-01, 02, 03, ...)
-    participant BAClients as BA Clients<br/>(client-01, 02, 03, ...)
-    participant HSMClients as HSM Clients<br/>(client-01, 02, ...)
-    participant Backup as Backup Storage
-    
-    Admin->>Inventory: 1. Verify inventory with all nodes
-    Admin->>UpgradePB: 2. ansible-playbook sp_server_upgrade_playbook.yml
-    
-    Note over UpgradePB,HSMClients: Phase 1: SP Server Upgrade
-    UpgradePB->>UpgradePB: Execute with target_hosts=sp_servers
-    
-    loop For each host in [sp_servers] group (parallel execution)
-        Note over UpgradePB: Pre-Upgrade Phase
-        UpgradePB->>Role: Invoke sp_server_install role
-        Role->>Module: Call sp_server_facts.py
-        Module->>SPServers: Query current version
-        SPServers-->>Module: Version 8.1.23.0
-        Module-->>Role: Current state collected
-        
-        Role->>SPServers: Validate upgrade path (8.1.23 -> 8.1.27)
-        SPServers-->>Role: Upgrade path valid
-        
-        Role->>SPServers: Check disk space
-        SPServers-->>Role: Sufficient space available
-        
-        Role->>Module: Call sp_server.py (backup config)
-        Module->>SPServers: Backup server configuration
-        SPServers->>Backup: Save configuration files
-        Backup-->>SPServers: Backup complete
-        
-        Note over UpgradePB: Upgrade Execution Phase
-        Role->>Module: Call sp_server.py (state=upgrade)
-        Module->>SPServers: Stop server services
-        Module->>SPServers: Extract upgrade packages
-        Module->>SPServers: Run IBM IM upgrade
-        Module->>SPServers: Migrate database schema
-        Module->>SPServers: Update configuration files
-        Module->>SPServers: Start server services
-        SPServers-->>Module: Services started
-        
-        Note over UpgradePB: Post-Upgrade Validation
-        Role->>Module: Call sp_server_facts.py
-        Module->>SPServers: Query new version
-        SPServers-->>Module: Version 8.1.27.0
-        
-        Role->>SPServers: Verify service status
-        Role->>SPServers: Test database connectivity
-        Role->>SPServers: Validate configuration
-        SPServers-->>Role: All checks passed
-    end
-    
-    UpgradePB-->>Admin: All SP servers upgraded to 8.1.27.0
-    
-    Note over UpgradePB,HSMClients: Phase 2: BA Client Upgrade
-    Admin->>BAUpgradePB: 3. ansible-playbook ba_client_upgrade_playbook.yml
-    BAUpgradePB->>BAUpgradePB: Execute with target_hosts=ba_clients
-    
-    loop For each host in [ba_clients] group (parallel execution)
-        BAUpgradePB->>Role: Invoke ba_client_install role
-        Role->>Module: Call sp_baclient_install.py (state=upgrade)
-        Module->>BAClients: Stop BA client services
-        Module->>BAClients: Upgrade BA client packages
-        Module->>BAClients: Update configuration
-        Module->>BAClients: Start BA client services
-        BAClients-->>Module: Upgrade complete
-        
-        Role->>BAClients: Verify connectivity to SP server
-        BAClients-->>Role: Connection verified
-    end
-    
-    BAUpgradePB-->>Admin: All BA clients upgraded
-    
-    Note over UpgradePB,HSMClients: Phase 3: HSM Client Upgrade (Optional)
-    Admin->>HSMUpgradePB: 4. ansible-playbook hsm_client_upgrade_playbook.yml
-    HSMUpgradePB->>HSMUpgradePB: Execute with target_hosts=hsm_clients
-    
-    loop For each host in [hsm_clients] group (parallel execution)
-        HSMUpgradePB->>Role: Invoke hsm_client_install role
-        Role->>Module: Call sp_baclient_install.py (HSM mode, state=upgrade)
-        Module->>HSMClients: Upgrade HSM client components
-        Module->>HSMClients: Update HSM configuration
-        Module->>HSMClients: Restart HSM services
-        HSMClients-->>Module: Upgrade complete
-        
-        Role->>HSMClients: Verify HSM functionality
-        HSMClients-->>Role: HSM verified
-    end
-    
-    HSMUpgradePB-->>Admin: All HSM clients upgraded
-    
-    Admin->>Admin: ✅ Complete petascale upgrade finished
+    participant CtrlNode as Control Node
+    participant SPNode as SP Server Node(s)
+    participant BANode as BA Client Node(s)
+    participant HSMNode as HSM Client Node(s)
 
+    Admin->>CtrlNode: ansible-playbook petascale_configure.yml
+
+    Note over CtrlNode,SPNode: Play 5: SP Server configuration
+    loop For each sp_server host
+        CtrlNode->>SPNode: imcl listInstalledPackages → set sp_server_installed
+        CtrlNode->>SPNode: Phase 1 — create tsm_user / tsm_group
+        CtrlNode->>SPNode: Phase 2 — create dirs, db2icrt (skip if exists)
+        CtrlNode->>SPNode: Phase 3 — write dsmserv.opt
+        CtrlNode->>SPNode: Phase 4 — dsmserv format (async) or skip if running
+        CtrlNode->>SPNode: Phase 4 — register admin, start server
+        CtrlNode->>SPNode: Phase 5 — open firewall port 1500
+        CtrlNode->>SPNode: Phase 6 — GPFS policy bootstrap (if enabled)
+        SPNode-->>CtrlNode: Configuration complete
+    end
+
+    Note over CtrlNode,BANode: Play 6: BA Client configuration
+    loop For each ba_client host
+        CtrlNode->>BANode: Check /opt/tivoli/tsm/client/ba/bin exists
+        CtrlNode->>BANode: Resolve mode (single-server vs multi-server)
+        CtrlNode->>BANode: Write dsm.sys (one stanza per SP Server)
+        CtrlNode->>BANode: Write dsm.opt (SERVERNAME default_server)
+        CtrlNode->>BANode: Create /var/log/tsm/, touch log files
+        CtrlNode->>BANode: ba_client_cert_fix.yml (test + import cert)
+        CtrlNode->>BANode: ba_client_auth_bootstrap.yml (expect GENERATE)
+        BANode-->>CtrlNode: Configuration complete
+    end
+
+    Note over CtrlNode,HSMNode: Play 7: HSM Client configuration
+    loop For each hsm_client host
+        CtrlNode->>HSMNode: Check /opt/tivoli/tsm/client/hsm/bin exists
+        CtrlNode->>HSMNode: Validate TSM + GPFS commands
+        CtrlNode->>HSMNode: Write dsm.sys + dsm.opt (with HSM directives)
+        CtrlNode->>HSMNode: Enable DMAPI (unmount → mmchfs -z yes → remount)
+        CtrlNode->>HSMNode: Register filesystem (dsmmigfs add /gpfs_main)
+        CtrlNode->>HSMNode: Apply active server binding (mmapplypolicy)
+        CtrlNode->>HSMNode: Write DR documentation
+        CtrlNode->>HSMNode: ba_client_cert_fix.yml + auth bootstrap
+        CtrlNode->>HSMNode: Comprehensive validation report
+        HSMNode-->>CtrlNode: Configuration complete
+    end
 ```
 
-#### Upgrade Execution Strategy
-
-1. **Sequential Phase Execution**:
-   - Phase 1: Upgrade all SP servers first
-   - Phase 2: Upgrade all BA clients after servers are ready
-   - Phase 3: Upgrade HSM clients (optional)
-
-2. **Parallel Processing Within Each Phase**:
-   - All servers in [sp_servers] upgraded in parallel
-   - All clients in [ba_clients] upgraded in parallel
-   - Controlled by `--forks` parameter
-
-3. **Rollback Considerations**:
-   - Configuration backed up before upgrade on each node
-   - Can rollback individual nodes if needed
-   - Use `--limit` to upgrade subset of nodes for testing
-
-4. **Execution Commands**:
-   ```bash
-   # Upgrade all SP servers
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/sp_server_upgrade_playbook.yml \
-     --forks 10
-   
-   # Upgrade all BA clients
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/ba_client_upgrade_playbook.yml \
-     --forks 50
-   
-   # Upgrade HSM clients (optional)
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/hsm_client_upgrade_playbook.yml \
-     --forks 20
-   ```
-
-### Uninstall Workflow (Multi-Node)
-
-**Overview**: The uninstall workflow removes SP servers and clients in reverse order (clients first, then servers) across multiple nodes.
-
-```mermaid
-sequenceDiagram
-    participant Admin
-    participant Inventory as Inventory File<br/>[sp_servers]<br/>[ba_clients]<br/>[hsm_clients]
-    participant HSMUninstallPB as HSM Client Uninstall Playbook
-    participant BAUninstallPB as BA Client Uninstall Playbook
-    participant UninstallPB as SP Server Uninstall Playbook
-    participant StorageCleanupPB as Storage Cleanup Playbook
-    participant Role as Ansible Role
-    participant Module as Ansible Module
-    participant HSMClients as HSM Clients<br/>(client-01, 02, ...)
-    participant BAClients as BA Clients<br/>(client-01, 02, 03, ...)
-    participant SPServers as SP Servers<br/>(sp-server-01, 02, 03, ...)
-    participant Storage as Storage System
-    
-    Admin->>Inventory: 1. Verify inventory with all nodes
-    Admin->>Admin: 2. Confirm uninstallation (destructive operation)
-    
-    Note over HSMUninstallPB,Storage: Phase 1: HSM Client Uninstall (Optional)
-    Admin->>HSMUninstallPB: 3. ansible-playbook hsm_client_uninstall_playbook.yml
-    HSMUninstallPB->>HSMUninstallPB: Execute with target_hosts=hsm_clients
-    
-    loop For each host in [hsm_clients] group (parallel execution)
-        HSMUninstallPB->>Role: Invoke hsm_client_install role
-        Role->>Module: Call sp_server_facts.py
-        Module->>HSMClients: Query HSM installation status
-        HSMClients-->>Module: HSM installed
-        
-        Note over HSMUninstallPB: Backup Phase (Optional)
-        Role->>Module: Backup HSM configuration
-        Module->>HSMClients: Export HSM configuration
-        HSMClients-->>Module: Configuration backed up
-        
-        Note over HSMUninstallPB: Uninstall Execution
-        Role->>Module: Call sp_baclient_install.py (state=absent, HSM mode)
-        Module->>HSMClients: Stop HSM services
-        Module->>HSMClients: Uninstall HSM components
-        Module->>HSMClients: Remove HSM configuration
-        HSMClients-->>Module: HSM uninstalled
-        
-        Role->>HSMClients: Verify HSM removed
-        HSMClients-->>Role: HSM components removed
-    end
-    
-    HSMUninstallPB-->>Admin: All HSM clients uninstalled
-    
-    Note over HSMUninstallPB,Storage: Phase 2: BA Client Uninstall
-    Admin->>BAUninstallPB: 4. ansible-playbook ba_client_uninstall_playbook.yml
-    BAUninstallPB->>BAUninstallPB: Execute with target_hosts=ba_clients
-    
-    loop For each host in [ba_clients] group (parallel execution)
-        BAUninstallPB->>Role: Invoke ba_client_install role
-        Role->>Module: Call sp_server_facts.py
-        Module->>BAClients: Query BA installation status
-        BAClients-->>Module: BA client installed
-        
-        Note over BAUninstallPB: Backup Phase (Optional)
-        Role->>Module: Backup BA configuration
-        Module->>BAClients: Export BA configuration
-        BAClients-->>Module: Configuration backed up
-        
-        Note over BAUninstallPB: Uninstall Execution
-        Role->>Module: Call sp_baclient_install.py (state=absent)
-        Module->>BAClients: Stop BA client services
-        Module->>BAClients: Uninstall BA client packages
-        Module->>BAClients: Remove installation directories
-        Module->>BAClients: Remove configuration files
-        BAClients-->>Module: BA client uninstalled
-        
-        Role->>BAClients: Verify BA client removed
-        BAClients-->>Role: No BA services found
-    end
-    
-    BAUninstallPB-->>Admin: All BA clients uninstalled
-    
-    Note over HSMUninstallPB,Storage: Phase 3: SP Server Uninstall
-    Admin->>UninstallPB: 5. ansible-playbook sp_server_uninstall_playbook.yml
-    UninstallPB->>UninstallPB: Execute with target_hosts=sp_servers
-    
-    loop For each host in [sp_servers] group (parallel execution)
-        UninstallPB->>Role: Invoke sp_server_install role
-        Role->>Module: Call sp_server_facts.py
-        Module->>SPServers: Query installation status
-        SPServers-->>Module: Server installed
-        
-        Note over UninstallPB: Backup Phase (Optional)
-        Role->>Module: Backup server configuration
-        Module->>SPServers: Export server configuration
-        Module->>SPServers: Backup database (optional)
-        SPServers-->>Module: Configuration backed up
-        
-        Note over UninstallPB: Uninstall Execution
-        Role->>Module: Call sp_server.py (state=absent)
-        Module->>SPServers: Stop all server services
-        Module->>SPServers: Halt server instance
-        Module->>SPServers: Run IBM IM uninstall
-        Module->>SPServers: Remove installation directories
-        Module->>SPServers: Remove user/group (optional)
-        SPServers-->>Module: Server uninstalled
-        
-        Role->>SPServers: Verify services removed
-        Role->>SPServers: Verify directories removed
-        SPServers-->>Role: Server completely removed
-    end
-    
-    UninstallPB-->>Admin: All SP servers uninstalled
-    
-    Note over HSMUninstallPB,Storage: Phase 4: Storage Cleanup (Optional)
-    Admin->>StorageCleanupPB: 6. ansible-playbook storage_cleanup_playbook.yml (if clean_up=true)
-    StorageCleanupPB->>StorageCleanupPB: Execute with target_hosts=sp_servers
-    
-    loop For each host in [sp_servers] group (parallel execution)
-        StorageCleanupPB->>Role: Invoke storage_prepare role
-        Role->>Storage: Unmount filesystems
-        Storage-->>Role: Filesystems unmounted
-        
-        Role->>Storage: Remove logical volumes (500+ TB)
-        Storage-->>Role: LVs removed
-        
-        Role->>Storage: Remove volume groups
-        Storage-->>Role: VGs removed
-        
-        Role->>Storage: Verify cleanup
-        Storage-->>Role: Storage cleaned
-    end
-    
-    StorageCleanupPB-->>Admin: All storage cleaned up
-    
-    Admin->>Admin: ✅ Complete petascale uninstallation finished
+### 5.3 Uninstallation Workflow
 
 ```
+Admin runs:
+  ansible-playbook petascale_uninstall.yml -e "confirm_uninstall=yes"
 
-#### Uninstall Execution Strategy
+  │
+  ├── Play 2: SP Server — stop services
+  │     dsmserv halt (via dsmadmc pipe)
+  │     db2 deactivate database
+  │     kill remaining dsmserv processes
+  │
+  ├── Play 3: SP Server — uninstall
+  │     imcl uninstall com.tivoli.dsm.server
+  │     Remove installation directories
+  │     Backup dsmserv.opt → dsmserv.opt.bk
+  │
+  ├── Play 4: BA Client — uninstall
+  │     systemctl stop dsmcad.service
+  │     pkill dsmc / dsmcad
+  │     rpm -e TIVsm-BA TIVsm-API
+  │     Backup /opt/tivoli/tsm/client/ba/bin/*.opt → *.opt.bk
+  │     Backup RPMs → /opt/baClientPackagesBk/
+  │
+  └── Play 5: HSM Client — uninstall
+        Stop dsmmigratemon, dsmwatchdog
+        rpm -e TIVsm-HSM
+        Backup HSM config → *.bk files
+```
 
-1. **Reverse Order Uninstallation**:
-   - Phase 1: Uninstall HSM clients first (optional)
-   - Phase 2: Uninstall BA clients
-   - Phase 3: Uninstall SP servers
-   - Phase 4: Clean up storage (optional)
+### 5.4 State Machine
 
-2. **Parallel Processing Within Each Phase**:
-   - All clients/servers in each group uninstalled in parallel
-   - Controlled by `--forks` parameter
-
-3. **Safety Considerations**:
-   - Confirmation required before uninstallation
-   - Configuration backup before removal (optional)
-   - Database backup before server uninstall (optional)
-   - Storage cleanup is optional and separate
-
-4. **Execution Commands**:
-   ```bash
-   # Uninstall HSM clients (optional)
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/hsm_client_uninstall_playbook.yml \
-     --forks 20
-   
-   # Uninstall BA clients
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/ba_client_uninstall_playbook.yml \
-     --forks 50
-   
-   # Uninstall SP servers
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/sp_server_uninstall_playbook.yml \
-     --forks 10
-   
-   # Clean up storage (optional, destructive)
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/storage_cleanup_playbook.yml \
-     --extra-vars "clean_up=true" \
-     --forks 10
-   ```
-
-5. **Selective Uninstallation**:
-   ```bash
-   # Uninstall specific servers only
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/sp_server_uninstall_playbook.yml \
-     --limit sp-server-01,sp-server-02
-   
-   # Uninstall specific clients only
-   ansible-playbook -i inventory/petascale.ini \
-     playbooks/ba_client_uninstall_playbook.yml \
-     --limit client-01,client-02
-   ```
-
----
-
-## Data Flow Diagrams
-
-### Installation State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> PreFlight: Start Installation
-    
-    PreFlight --> Phase1: Validation Passed
-    PreFlight --> Failed: Validation Failed
-    
-    Phase1 --> InterPhase1: Install Complete
-    Phase1 --> Failed: Install Failed
-    
-    InterPhase1 --> Phase2: Validation Passed
-    InterPhase1 --> Failed: Validation Failed
-    
-    Phase2 --> InterPhase2: Storage Complete
-    Phase2 --> Failed: Storage Failed
-    
-    InterPhase2 --> Phase3: Validation Passed
-    InterPhase2 --> Failed: Validation Failed
-    
-    Phase3 --> PostFlight: Configure Complete
-    Phase3 --> Failed: Configure Failed
-    
-    PostFlight --> Success: All Checks Passed
-    PostFlight --> Failed: Checks Failed
-    
-    Success --> [*]
-    Failed --> [*]
-    
-    note right of PreFlight
-        - Validate parameters
-        - Check prerequisites
-        - Verify connectivity
-        - Hardware validation
-    end note
-    
-    note right of Phase1
-        - Create user/group
-        - Install packages
-        - Initialize instance
-        - Start services
-    end note
-    
-    note right of Phase2
-        - Discover disks
-        - Create VGs/LVs
-        - Format filesystems
-        - Mount storage
-    end note
-    
-    note right of Phase3
-        - Configure server
-        - Create pools
-        - Define policies
-        - Setup schedules
-    end note
+```
+                    ┌──────────────────┐
+                    │   NOT INSTALLED  │
+                    └────────┬─────────┘
+                             │ petascale_install.yml
+                             │ (--tags install for SP Server)
+                             ▼
+                    ┌──────────────────┐
+                    │    INSTALLED     │◄─────────────────┐
+                    └────────┬─────────┘                  │
+                             │ petascale_configure.yml     │ (re-run is safe
+                             ▼                             │  — idempotent)
+                    ┌──────────────────┐                  │
+                    │   CONFIGURED     │──────────────────►┘
+                    └────────┬─────────┘
+                             │ petascale_uninstall.yml
+                             │ -e "confirm_uninstall=yes"
+                             ▼
+                    ┌──────────────────┐
+                    │   NOT INSTALLED  │
+                    │ (data preserved) │
+                    └──────────────────┘
 ```
 
 ---
 
-## Configuration Management
+## 6. Configuration Management
 
-### Inventory Configuration
+### 6.1 Variable Hierarchy
 
-**File**: [`playbooks/inventory/petascale.ini`](../../playbooks/inventory/petascale.ini)
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Priority 1 (highest): CLI -e flags                         │
+│    ansible-playbook ... -e "server_size=xsmall"             │
+├─────────────────────────────────────────────────────────────┤
+│  Priority 2: host_vars/<hostname>.yml                       │
+│    playbooks/host_vars/sp-server-01.yml                     │
+│    playbooks/host_vars/ba-client-01.yml                     │
+│    playbooks/host_vars/hsm-client-03.yml                    │
+├─────────────────────────────────────────────────────────────┤
+│  Priority 3: group_vars/<groupname>.yml                     │
+│    playbooks/group_vars/sp_servers.yml                      │
+│    playbooks/group_vars/ba_clients.yml                      │
+│    playbooks/group_vars/hsm_clients.yml                     │
+├─────────────────────────────────────────────────────────────┤
+│  Priority 4: group_vars/all.yml                             │
+│    Global defaults (Python path, ansible_become, etc.)      │
+├─────────────────────────────────────────────────────────────┤
+│  Priority 5 (lowest): Role defaults                         │
+│    roles/*/defaults/main.yml                                │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**Structure**:
+### 6.2 Variable Scoping Design
+
+Each component's variables are namespaced to avoid collisions:
+
+| Namespace | Used by | Examples |
+|---|---|---|
+| `sp_server_*` | SP Server role and configure tasks | `sp_server_version`, `sp_server_package_path`, `sp_server_active_log_size` |
+| `ba_client_*` | BA Client role | `ba_client_version`, `ba_client_package_path`, `ba_client_state` |
+| `hsm_client_*` | HSM Client role | `hsm_client_version`, `hsm_client_package_path`, `hsm_client_state` |
+| `gpfs_*` | SP Server GPFS bootstrap | `gpfs_policy_bootstrap_enabled`, `gpfs_storage_pool_name`, `gpfs_policy_domain` |
+| `hsm_*` | HSM Client configure | `hsm_node_password`, `hsm_policy_domain`, `hsm_storage_pool_name` |
+| `server_*` | SP Server identity | `server_name`, `server_size`, `server_password` |
+| `tsm_*` | SP Server OS user | `tsm_user`, `tsm_group`, `tsm_user_uid`, `tsm_group_gid` |
+
+### 6.3 Connection Mode Selection
+
+The configure playbook supports single-server and multi-server modes for BA and HSM clients, selected automatically:
+
+```
+if sp_servers is defined and sp_servers | length > 0:
+    mode = MULTI_SERVER
+    dsm.sys: one stanza per entry in sp_servers list
+    dsm.opt: SERVERNAME {{ default_server }}
+    HSM dsm.opt: also adds HSMMULTISERVER YES, HSMEXTOBJIDATTR YES, etc.
+else:
+    mode = SINGLE_SERVER
+    dsm.sys: one stanza using sp_server_name / sp_server_address / sp_server_port
+    dsm.opt: SERVERNAME {{ sp_server_name }}
+```
+
+### 6.4 SP Server Active Log Size Logic
+
+```
+if sp_server_active_log_size is explicitly set:
+    use that value (MB)
+else:
+    derive from server_size:
+        xsmall → 30,000 MB
+        small  → 65,536 MB
+        medium → 131,072 MB
+        large  → 262,144 MB
+```
+
+### 6.5 File Layout
+
+```
+playbooks/
+├── petascale_install.yml
+├── petascale_configure.yml
+├── petascale_uninstall.yml
+├── petascale_upgrade.yml          ← future work
+├── inventory/
+│   └── petascale.ini
+├── group_vars/
+│   ├── all.yml
+│   ├── sp_servers.yml
+│   ├── ba_clients.yml
+│   └── hsm_clients.yml
+└── host_vars/
+    ├── sp-server-01.yml
+    ├── sp-server-02.yml
+    ├── ba-client-01.yml
+    ├── ba-client-02.yml
+    └── hsm-client-03.yml
+
+roles/
+├── sp_server_install/
+│   ├── tasks/
+│   │   ├── main.yml
+│   │   ├── sp_server_prechecks_linux.yml
+│   │   ├── sp_server_install_linux.yml
+│   │   ├── sp_server_configuration_petascale.yml   ← configure phases 1-6
+│   │   ├── sp_server_stop_services.yml
+│   │   ├── sp_server_clean_config.yml
+│   │   └── sp_server_uninstall_linux.yml
+│   └── defaults/main.yml
+├── ba_client_install/
+│   ├── tasks/
+│   │   ├── main.yml
+│   │   ├── ba_client_install_linux.yml
+│   │   ├── ba_client_uninstall_linux.yml
+│   │   ├── ba_client_cert_fix.yml
+│   │   └── ba_client_auth_bootstrap.yml
+│   └── defaults/main.yml
+└── hsm_client_install/
+    ├── tasks/
+    │   ├── main.yml
+    │   ├── hsm_client_install_linux.yml
+    │   └── hsm_client_configure.yml
+    ├── templates/
+    │   └── hsm_active_binding_policy.j2
+    └── defaults/main.yml
+```
+
+---
+
+## 7. Multi-Server Topology Design
+
+### 7.1 Overview
+
+A single GPFS cluster can back up to multiple SP Servers simultaneously, with each SP Server responsible for a distinct GPFS fileset. The `sp_servers` list variable in a client's host_vars activates multi-server mode.
+
+```
+GPFS Cluster (/gpfs_main)
+├── fileset_1 ──► SP Server 01 (PETASCALE-SP01, 9.11.53.28)
+├── fileset_2 ──► SP Server 02 (PETASCALE-SP02, 9.11.53.29)
+└── fileset_3 ──► SP Server 03 (PETASCALE-SP03, 9.11.53.30)
+```
+
+### 7.2 Active Server Binding
+
+Each file in a GPFS fileset carries a `dmapi.IBMServ` DMAPI attribute that tells the HSM client which SP Server to use for migrate and recall operations.
+
+```
+File in /gpfs_main/fileset_1/
+    DMAPI attr: dmapi.IBMServ = "PETASCALE-SP01"
+    → HSM client routes all migrate/recall to SP Server 01
+
+File in /gpfs_main/fileset_2/
+    DMAPI attr: dmapi.IBMServ = "PETASCALE-SP02"
+    → HSM client routes all migrate/recall to SP Server 02
+```
+
+**How the automation sets this attribute:**
+
+```
+Phase 6 — HSM configure (hsm_client_configure.yml):
+    1. Render hsm_active_binding_policy.j2 → /tmp/hsm_active_binding_policy_<host>.txt
+    2. mmapplypolicy /gpfs_main -P <policy_file> -I defer
+    3. Fallback 1: mmputattr -k dmapi.IBMServ -v <SERVER_NAME> per fileset
+    4. Fallback 2: setfattr -n user.dmapi.IBMServ per fileset
+    5. Verify: mmlsattr -L <test_file> | grep IBMServ
+```
+
+### 7.3 `dsm.sys` Generation for Multi-Server Mode
+
+```
+Generated /opt/tivoli/tsm/client/hsm/bin/dsm.sys:
+
+SERVERNAME PETASCALE-SP01
+  COMMMethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.28
+  NODename           hsm-client-03-sp01
+  PASSWORDACCESS     GENERATE
+  ERRORLOGNAME       /var/log/tsm/dsmerror_petascale-sp01.log
+  SCHEDLOGNAME       /var/log/tsm/dsmsched_petascale-sp01.log
+  DOMAIN             /gpfs_main/fileset_2
+
+SERVERNAME PETASCALE-SP02
+  COMMMethod         TCPip
+  TCPPort            1500
+  TCPServeraddress   9.11.53.29
+  NODename           hsm-client-03-sp02
+  PASSWORDACCESS     GENERATE
+  ERRORLOGNAME       /var/log/tsm/dsmerror_petascale-sp02.log
+  SCHEDLOGNAME       /var/log/tsm/dsmsched_petascale-sp02.log
+  DOMAIN             /gpfs_main/fileset_3
+```
+
+### 7.4 GPFS Policy Bootstrap on SP Server
+
+When `gpfs_policy_bootstrap_enabled: true` on an SP Server, the configure playbook establishes the minimum working TSM policy for GPFS workloads:
+
+```
+dsmadmc commands executed via stdin pipe:
+  define stgpool GPFSPOOL FILE maxscratch=0
+  define stgpooldirectory GPFSPOOL /tmp/data maxsize=100G
+  define domain GPFS_DOMAIN
+  define policyset GPFS_DOMAIN STANDARD
+  define mgmtclass GPFS_DOMAIN STANDARD GPFS_DAILY
+  define copygroup GPFS_DOMAIN STANDARD GPFS_DAILY type=backup
+      verexists=30 verdeleted=60 retextra=30 retonly=90
+  assign defmgmtclass GPFS_DOMAIN STANDARD GPFS_DAILY
+  validate policyset GPFS_DOMAIN STANDARD
+  activate policyset GPFS_DOMAIN STANDARD
+  register node hsm-client-03-sp01 <password> domain=GPFS_DOMAIN
+  register node hsm-client-03-sp02 <password> domain=GPFS_DOMAIN
+  ...
+```
+
+Each command is preceded by a `query` to check for prior existence — `define` is only run if the object does not already exist.
+
+### 7.5 Node Registration Cross-Reference
+
+The SP Server `gpfs_policy_bootstrap` registers HSM client nodes by reading the `sp_servers` list from each HSM client's host_vars. This is implemented via a `delegate_to` pattern: the task runs in the context of the SP Server but reads variables from the HSM client host.
+
+```yaml
+# Conceptual representation
+- name: Register HSM nodes on SP Server
+  delegate_to: "{{ sp_server_inventory_hostname }}"
+  command: >
+    dsmadmc -id={{ admin_name }} -password={{ admin_password }}
+    "register node {{ item.node_name }} {{ hsm_node_password }}
+     domain={{ gpfs_policy_domain }}"
+  loop: "{{ groups['hsm_clients'] | ... }}"
+```
+
+---
+
+## 8. Security Design
+
+### 8.1 Credential Storage
+
+| Credential | Recommended Storage | Used by |
+|---|---|---|
+| SP Server admin password | Ansible Vault in `host_vars` | `petascale_configure.yml` — dsmadmc calls |
+| SP Server SSL password | Ansible Vault in `host_vars` | SP Server install, cert generation |
+| TSM OS user password | Ansible Vault in `host_vars` | Phase 1 of sp_server_configuration_petascale |
+| HSM node password | Ansible Vault in `host_vars` | `register node` bootstrap, auth cache |
+| Inventory `ansible_password` | Ansible Vault in inventory or separate vault file | SSH/sudo authentication |
+
+**Encryption practice**: All credential variables should be encrypted with `ansible-vault encrypt_string` or stored in a vault file referenced via `--vault-password-file`.
+
+### 8.2 SSL Certificate Trust Chain
+
+```
+SP Server (configure phase 5):
+    dsmserv creates self-signed cert at /home/tsminst1/cert256.arm
+
+Client (ba_client_cert_fix.yml):
+    dsmcert -add -label PETASCALE-SP01 -file cert256.arm
+    → Adds SP Server cert to /opt/tivoli/tsm/client/ba/bin/dsmcert.kdb
+
+Result: Client trusts SP Server's certificate for all future connections
+```
+
+For single-server mode when direct cert file fetch is not available, the task falls back to:
+
+```bash
+openssl s_client -connect <address>:9443 -showcerts < /dev/null 2>/dev/null \
+  | openssl x509 -outform PEM > /tmp/sp_cert.pem
+dsmcert -add -label PETASCALE-SP01 -file /tmp/sp_cert.pem
+```
+
+### 8.3 Auth Cache Bootstrap Design
+
+The `PASSWORDACCESS GENERATE` auth cache bootstrap requires interactive password input on first use. The automation uses `expect` to automate this:
+
+```
+expect script flow:
+  1. Run: dsmc query session -servername=PETASCALE-SP01
+  2. Detect prompt: "Enter your user id:"
+  3. Send: node_name
+  4. Detect prompt: "Enter password for user:"
+  5. Send: node_password
+  6. Password gets cached in /etc/adsm/TSM.PWD (root) or ~/.tsm/TSM.PWD (user)
+  7. Subsequent runs: dsmc query session succeeds non-interactively
+```
+
+If `expect` is absent, the task emits a warning and skips. Post-bootstrap, `dsmc query session` is run to confirm non-interactive access succeeds. If it fails, the automation runs `update node <nodename> forcepwreset=no` on the SP Server to unlock the node.
+
+### 8.4 SSH and Privilege Escalation
+
+- All plays use `become: yes` / `become_method: sudo` by default (configurable in `group_vars/all.yml`)
+- SP Server configuration tasks require root-equivalent access for DB2 instance creation and `dsmserv format`
+- HSM Client tasks require root access for `mmchfs`, `mmapplypolicy`, and `setfattr`
+
+---
+
+## 9. Error Handling & Idempotency
+
+### 9.1 Pre-flight Dependency Validation
+
+The install playbook runs a comprehensive dependency check before any installation begins. Failures are collected into a structured report:
+
+```
+DEPENDENCY VALIDATION — hostname (FAILED)
+  ✗ Python 3.9: ABSENT (/usr/bin/python3.9 not found)
+  ✓ Java: present
+  ✗ lsof: ABSENT
+  ✓ rsync: present
+  ✗ /tmp permissions: 755 (required: 1777)
+  ✓ /tmp mount: no noexec flag
+  ✓ /tmp disk space: 45 GB available
+
+Remediation:
+  yum install python39
+  yum install lsof
+  chmod 1777 /tmp
+```
+
+The check runs for all hosts in parallel. Hosts that fail validation are excluded from subsequent plays via a registered variable (`dependency_check_passed`).
+
+### 9.2 Idempotency Design Patterns
+
+| Component | Idempotency Mechanism |
+|---|---|
+| SP Server install | `imcl listInstalledPackages \| grep com.tivoli.dsm.server` → skip if found |
+| BA Client install | `rpm -q TIVsm-BA` → skip if installed |
+| HSM Client install | `rpm -q TIVsm-HSM` → skip if installed |
+| DB2 instance creation | `db2ilist \| grep tsminst1` → skip if instance exists |
+| `dsmserv.opt` options | `lineinfile` / `blockinfile` — writes only if absent or changed |
+| Database format | Check if dsmserv is already running before invoking `dsmserv format` |
+| Admin registration | `query admin {{ admin_name }}` before `register admin` |
+| GPFS policy objects | `query stgpool / query domain / query mgmtclass` before each `define` |
+| Node registration | `query node {{ node_name }}` before `register node` |
+| SSL cert import | Test dsmadmc connection first; only import cert if error detected |
+| Auth bootstrap | Run `dsmc query session` first; only bootstrap if non-interactive fails |
+| DMAPI enablement | `mmlsfs gpfs_main -z` → skip if already enabled |
+| HSM filesystem | `dsmmigfs query /gpfs_main` → skip if already managed |
+| Active server binding | Verify attribute on test file after apply; skip if already set |
+
+### 9.3 Rollback Design
+
+The installation role uses Ansible's `block` / `rescue` / `always` pattern:
+
+```yaml
+block:
+  - Extract package to /tmp/install_dir
+  - Run IBM Installation Manager
+  - Verify installation
+rescue:
+  - Remove partially installed files
+  - Remove install_dir
+  - Record failure in results dict
+always:
+  - Clean up temp extraction directory
+```
+
+For the configure playbook, most phases are non-destructive (writing config files, running dsmadmc commands). A failed SP Server database format is handled by killing the async dsmserv process and removing the partially formatted database so a subsequent run starts fresh.
+
+### 9.4 Result Aggregation
+
+Both the install and configure playbooks aggregate per-host results into a summary printed by the final localhost play:
+
+```
+PETASCALE INSTALLATION SUMMARY
+═══════════════════════════════
+
+SP Servers:
+  Already installed (skipped): sp-server-01
+  Newly installed:             sp-server-02
+  Failed:                      (none)
+
+BA Clients:
+  Already installed (skipped): ba-client-01, ba-client-02
+  Newly installed:             ba-client-03
+  Failed:                      (none)
+
+HSM Clients:
+  Already installed (skipped): (none)
+  Newly installed:             hsm-client-03
+  Failed:                      (none)
+
+Elapsed: 00:18:42
+```
+
+---
+
+## 10. Performance & Scalability
+
+### 10.1 Parallel Execution
+
+All plays target inventory groups, not individual hosts. Ansible's `--forks` controls the degree of parallelism:
+
+| Deployment size | Recommended `--forks` |
+|---|---|
+| 1-10 nodes | 5 (default) |
+| 10-50 nodes | 20 |
+| 50-200 nodes | 50 |
+| 200+ nodes | 100 |
+
+```bash
+ansible-playbook playbooks/petascale_install.yml \
+  -i playbooks/inventory/petascale.ini \
+  --forks 50 \
+  --tags install
+```
+
+### 10.2 Database Format Timeout
+
+SP Server database formatting is the slowest operation (typically 5–20 minutes for medium/large sizes). The async timeout is configurable:
+
+| Variable | Default | Description |
+|---|---|---|
+| `db_format_timeout` | `1800` (30 min) | Async timeout for `dsmserv format` |
+
+Increase for very large databases:
+
+```bash
+ansible-playbook playbooks/petascale_configure.yml \
+  -e "db_format_timeout=3600"
+```
+
+### 10.3 SP Server Size → Active Log → Sessions
+
+| `server_size` | Active log | Max concurrent sessions |
+|---|---|---|
+| `xsmall` | 30,000 MB | ~75 |
+| `small` | 65,536 MB | ~250 |
+| `medium` | 131,072 MB | ~500 |
+| `large` | 262,144 MB | ~1,000 |
+
+### 10.4 Fact Caching
+
+For deployments with many nodes, enable fact caching in `ansible.cfg` to avoid re-gathering facts on each run:
+
 ```ini
-[sp_servers]
-sp-server-01 ansible_host=192.168.1.100 ansible_user=root
-
-[sp_servers:vars]
-ansible_python_interpreter=/usr/bin/python3
-ansible_connection=ssh
-ansible_become=yes
-
-[petascale_production]
-sp-server-01
-
-[sp_infrastructure:children]
-sp_servers
-ba_clients
-storage_agents
-operations_center
-```
-
-### Variable Management
-
-**Petascale Variables** (`playbooks/vars/petascale_vars.yml`):
-```yaml
-# Installation
-sp_server_version: "8.1.27.0"
-sp_server_state: "present"
-sp_server_bin_repo: "/data/sp-packages"
-
-# Configuration
-server_blueprint: true
-server_size: "large"
-storage_prepare_size: "large"
-
-# Security (use Ansible Vault)
-ssl_password: "{{ vault_ssl_password }}"
-dbbk_password: "{{ vault_dbbk_password }}"
-server_password: "{{ vault_server_password }}"
-admin_password: "{{ vault_admin_password }}"
-
-# Performance
-maxcap: "500G"
-dbbk_streams: "8"
-dbbk_compress: "YES"
+[defaults]
+gathering = smart
+fact_caching = jsonfile
+fact_caching_connection = /tmp/ansible_facts
+fact_caching_timeout = 3600
 ```
 
 ---
 
-## Storage Architecture
+## 11. Usage Examples
 
-### Petascale Storage Layout
-
-```mermaid
-graph TB
-    subgraph "Physical Disks"
-        DB_Disks[Database Disks<br/>SSD/NVMe RAID 10<br/>4+ TB]
-        AL_Disks[Active Log Disks<br/>NVMe RAID 1<br/>600 GB]
-        AR_Disks[Archive Log Disks<br/>SSD RAID 5<br/>4+ TB]
-        FS_Disks[File Storage Disks<br/>HDD RAID 6<br/>500+ TB]
-        BK_Disks[Backup Disks<br/>HDD RAID 5<br/>16+ TB]
-    end
-    
-    subgraph "LVM Layer"
-        VG_DB[vg_dbspace]
-        VG_AL[vg_alog]
-        VG_AR[vg_archlog]
-        VG_FS[vg_file]
-        VG_BK[vg_backup]
-        
-        LV_DB[lv_dbspace<br/>4 TB]
-        LV_AL[lv_alog<br/>600 GB]
-        LV_AR[lv_archlog<br/>4 TB]
-        LV_FS[lv_file<br/>500 TB]
-        LV_BK[lv_backup<br/>16 TB]
-    end
-    
-    subgraph "Filesystem Layer"
-        FS_DB[/tsminst1/TSMdbspace<br/>ext4]
-        FS_AL[/tsminst1/TSMalog<br/>ext4]
-        FS_AR[/tsminst1/TSMarchlog<br/>ext4]
-        FS_FS[/tsminst1/TSMfile<br/>ext4]
-        FS_BK[/tsminst1/TSMbkup<br/>ext4]
-    end
-    
-    subgraph "SP Server"
-        DB_Engine[Database Engine]
-        Log_Manager[Log Manager]
-        Storage_Manager[Storage Manager]
-    end
-    
-    DB_Disks --> VG_DB
-    AL_Disks --> VG_AL
-    AR_Disks --> VG_AR
-    FS_Disks --> VG_FS
-    BK_Disks --> VG_BK
-    
-    VG_DB --> LV_DB
-    VG_AL --> LV_AL
-    VG_AR --> LV_AR
-    VG_FS --> LV_FS
-    VG_BK --> LV_BK
-    
-    LV_DB --> FS_DB
-    LV_AL --> FS_AL
-    LV_AR --> FS_AR
-    LV_FS --> FS_FS
-    LV_BK --> FS_BK
-    
-    FS_DB --> DB_Engine
-    FS_AL --> Log_Manager
-    FS_AR --> Log_Manager
-    FS_FS --> Storage_Manager
-    FS_BK --> Storage_Manager
-    
-    style FS_FS fill:#ff6b6b
-    style LV_FS fill:#ff6b6b
-    style VG_FS fill:#ff6b6b
-    style FS_Disks fill:#ff6b6b
-```
-
----
-
-## Performance & Scalability
-
-### Performance Tuning Parameters
-
-**Server Parameters** (Large/Petascale):
-```sql
-UPDATE SERVER SET MAXSESSIONS=1000
-UPDATE SERVER SET MOVEBATCHSIZE=5000
-UPDATE SERVER SET EXPINTERVAL=24
-UPDATE SERVER SET TXNGROUPMAX=4096
-UPDATE SERVER SET BUFFPOOLSIZE=524288
-UPDATE SERVER SET DBMEMPERCENT=80
-```
-
-### Scalability Metrics
-
-| Metric | Target | Monitoring |
-|--------|--------|------------|
-| **Concurrent Sessions** | 1000+ | QUERY SESSION |
-| **Backup Throughput** | 10+ TB/hour | QUERY PROCESS |
-| **Database Size** | 3-4 TB | QUERY DB |
-| **Storage Utilization** | <80% | QUERY OCCUPANCY |
-| **Network Throughput** | 20+ Gbps | System monitoring |
-
----
-
-## Security Considerations
-
-### Credential Management
-
-**Ansible Vault Usage**:
-```bash
-# Create encrypted vault file
-ansible-vault create vars/petascale_secrets.yml
-
-# Content
-vault_ssl_password: "SecureSSL@Pass123"
-vault_admin_password: "SecureAdmin@Pass456"
-vault_server_password: "SecureServer@Pass789"
-vault_dbbk_password: "SecureDBBk@Pass012"
-
-# Usage
-ansible-playbook sp_server_blueprint.yml \
-  -e @vars/large_server_vars.yml \
-  -e @vars/petascale_secrets.yml \
-  --vault-password-file vault_pass.txt
-```
-
----
-
-## Usage Examples
-
-### Complete Petascale Deployment
+### 11.1 Complete Deployment (Install → Configure)
 
 ```bash
-# 1. Prepare inventory
-cat > playbooks/inventory/petascale.ini <<EOF
-[petascale_servers]
-petascale-sp-01 ansible_host=192.168.1.100 ansible_user=root
+# Step 1: Install all components
+ansible-playbook playbooks/petascale_install.yml \
+  -i playbooks/inventory/petascale.ini \
+  --tags install
 
-[petascale_servers:vars]
-ansible_python_interpreter=/usr/bin/python3
-ansible_connection=ssh
-ansible_become=yes
-EOF
-
-# 2. Create petascale variables file
-cat > playbooks/vars/petascale_vars.yml <<EOF
-# Petascale Configuration
-sp_server_version: "8.1.27.0"
-sp_server_state: "present"
-server_blueprint: true
-server_size: "large"
-storage_prepare_size: "large"
-sp_server_bin_repo: "/data/sp-packages"
-target_hosts: "petascale_servers"
-
-# Petascale-specific settings
-max_sessions: 1000
-storage_capacity_tb: 500
-dbbk_streams: 8
-dbbk_compress: "YES"
-maxcap: "500G"
-
-# Instance configuration
-instance_dir: "/tsminst1"
-instance_user: "tsminst1"
-EOF
-
-# 3. Create secrets (use Ansible Vault)
-ansible-vault create playbooks/vars/petascale_secrets.yml
-# Add:
-# vault_ssl_password: "SecureSSL@Pass123"
-# vault_admin_password: "SecureAdmin@Pass456"
-# vault_server_password: "SecureServer@Pass789"
-# vault_dbbk_password: "SecureDBBk@Pass012"
-
-# 4. Deploy Petascale Solution
-ansible-playbook -i playbooks/inventory/petascale.ini \
-  playbooks/petascale_install.yml \
-  -e @playbooks/vars/petascale_vars.yml \
-  -e @playbooks/vars/petascale_secrets.yml \
-  --vault-password-file vault_pass.txt
+# Step 2: Configure all components
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini
 ```
 
-### Upgrade Petascale Server
+### 11.2 Selective Installation
 
 ```bash
-# Upgrade to newer version
-ansible-playbook -i playbooks/inventory/petascale.ini \
-  playbooks/petascale_upgrade_playbook.yml \
-  -e sp_server_version="8.1.27.0" \
-  -e sp_server_bin_repo="/data/sp-packages" \
-  -e @playbooks/vars/petascale_secrets.yml \
-  --vault-password-file vault_pass.txt
+# Clients only (skip SP Servers)
+ansible-playbook playbooks/petascale_install.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit 'all:!sp_servers'
+
+# BA Clients only
+ansible-playbook playbooks/petascale_install.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit ba_clients
 ```
 
-### Uninstall Petascale Server
+### 11.3 Selective Configuration
 
 ```bash
-# Uninstall without storage cleanup
-ansible-playbook -i playbooks/inventory/petascale.ini \
-  playbooks/petascale_uninstall_playbook.yml \
-  -e clean_up=false \
-  --vault-password-file vault_pass.txt
+# SP Servers only
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  -e "configure_clients=false"
 
-# Uninstall with complete storage cleanup (500+ TB)
-ansible-playbook -i playbooks/inventory/petascale.ini \
-  playbooks/petascale_uninstall_playbook.yml \
-  -e clean_up=true \
-  --vault-password-file vault_pass.txt
+# Clients only (skip SP Servers)
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  -e "configure_servers=false"
+
+# Override server_size at runtime
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --limit sp-server-01 \
+  -e "server_size=xsmall"
+
+# BA Client tag only
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --tags ba_client_config
 ```
 
-### Configure Petascale Server
+### 11.4 Uninstall
 
 ```bash
-# Apply petascale-specific configuration changes
-ansible-playbook -i playbooks/inventory/petascale.ini \
-  playbooks/petascale_configure_playbook.yml \
-  -e @playbooks/vars/petascale_vars.yml \
-  -e @playbooks/vars/petascale_secrets.yml \
-  --vault-password-file vault_pass.txt
+# Preview
+ansible-playbook playbooks/petascale_uninstall.yml \
+  -i playbooks/inventory/petascale.ini
+
+# Execute
+ansible-playbook playbooks/petascale_uninstall.yml \
+  -i playbooks/inventory/petascale.ini \
+  -e "confirm_uninstall=yes"
 ```
 
-### Gather Petascale Facts
+### 11.5 Dry Run
 
 ```bash
-# Collect petascale server information and metrics
-ansible-playbook -i playbooks/inventory/petascale.ini \
-  playbooks/petascale_facts_playbook.yml
+ansible-playbook playbooks/petascale_install.yml \
+  -i playbooks/inventory/petascale.ini \
+  --check
+
+ansible-playbook playbooks/petascale_configure.yml \
+  -i playbooks/inventory/petascale.ini \
+  --check
 ```
 
 ---
 
-## Troubleshooting Guide
+## 12. Troubleshooting Design
 
-### Common Issues
+### 12.1 Diagnostic Information Collected
 
-| Issue | Cause | Resolution |
-|-------|-------|------------|
-| Insufficient disk space | Not enough disks for 500+ TB | Add more physical disks |
-| Low memory | Less than 128 GB RAM | Upgrade server memory |
-| Slow performance | Network bandwidth < 10 GbE | Upgrade network interface |
-| Installation fails | Missing prerequisites | Run pre-checks, install dependencies |
-| Storage creation fails | Disk not available | Verify disk paths with `lsblk` |
-
-### Diagnostic Commands
-
-```bash
-# Check installation status
-ansible -i inventory/petascale.ini sp_servers -m shell \
-  -a "su - tsminst1 -c 'dsmadmc -id=admin -pa=password q status'"
-
-# Check storage
-ansible -i inventory/petascale.ini sp_servers -m shell \
-  -a "df -h | grep TSM"
-
-# Check sessions
-ansible -i inventory/petascale.ini sp_servers -m shell \
-  -a "su - tsminst1 -c 'dsmadmc -id=admin -pa=password q session'"
-```
-
----
-
-## References
-
-### Related Design Documents
-- [SP Server Design](design-sp-server.md)
-- [BA Client Design](design-ba-client.md)
-- [Storage Agent Design](design-storage-agent.md)
-- [Operations Center Design](design-oc.md)
-- [Blueprint Configuration Solution](design-sp-blueprint-conf-solution.md)
-
-### External Documentation
-- [IBM Storage Protect Documentation](https://www.ibm.com/docs/en/storage-protect/8.1.27)
-- [Ansible Documentation](https://docs.ansible.com/)
-- [Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html)
-
-### Related Files
-
-#### Playbooks (To Be Created)
-- [`playbooks/petascale_install.yml`](../../playbooks/petascale_install.yml) - Main orchestrator
-- [`playbooks/petascale_install_playbook.yml`](../../playbooks/petascale_install_playbook.yml) - Installation
-- [`playbooks/petascale_upgrade_playbook.yml`](../../playbooks/petascale_upgrade_playbook.yml) - Upgrade
-- [`playbooks/petascale_uninstall_playbook.yml`](../../playbooks/petascale_uninstall_playbook.yml) - Uninstall
-- [`playbooks/petascale_configure_playbook.yml`](../../playbooks/petascale_configure_playbook.yml) - Configuration
-- [`playbooks/petascale_storage_prepare_playbook.yml`](../../playbooks/petascale_storage_prepare_playbook.yml) - Storage preparation
-- [`playbooks/petascale_facts_playbook.yml`](../../playbooks/petascale_facts_playbook.yml) - Facts gathering
-
-#### Roles (To Be Created)
-- [`roles/petascale_server_install/`](../../roles/petascale_server_install/)
-- [`roles/petascale_storage_prepare/`](../../roles/petascale_storage_prepare/)
-- [`roles/petascale_server_facts/`](../../roles/petascale_server_facts/)
-
-#### Modules (To Be Created)
-- [`plugins/modules/petascale_server.py`](../../plugins/modules/petascale_server.py)
-- [`plugins/modules/petascale_server_configure.py`](../../plugins/modules/petascale_server_configure.py)
-- [`plugins/modules/petascale_server_facts.py`](../../plugins/modules/petascale_server_facts.py)
-
-#### Module Utilities (To Be Created)
-- [`plugins/module_utils/petascale_server_utils.py`](../../plugins/module_utils/petascale_server_utils.py)
-- [`plugins/module_utils/petascale_storage_utils.py`](../../plugins/module_utils/petascale_storage_utils.py)
-
-#### Variables and Inventory (To Be Created)
-- [`playbooks/vars/petascale_vars.yml`](../../playbooks/vars/petascale_vars.yml)
-- [`playbooks/inventory/petascale.ini`](../../playbooks/inventory/petascale.ini)
-
-#### Documentation (To Be Created)
-- [`docs/guides/petascale-deployment-guide.md`](../../docs/guides/petascale-deployment-guide.md)
-- [`docs/guides/petascale-operations-guide.md`](../../docs/guides/petascale-operations-guide.md)
-- [`docs/guides/petascale-troubleshooting-guide.md`](../../docs/guides/petascale-troubleshooting-guide.md)
-
----
-
-## Implementation Roadmap
-
-### Phase 1: Core Infrastructure (Priority: High)
-
-**Playbooks to Create:**
-1. `playbooks/petascale_install.yml` - Main orchestrator (3-phase deployment)
-2. `playbooks/petascale_install_playbook.yml` - Installation playbook (large server config)
-3. `playbooks/petascale_storage_prepare_playbook.yml` - Storage preparation (500+ TB)
-
-**Roles to Create:**
-1. `roles/petascale_server_install/` - Complete role with all tasks and templates
-2. `roles/petascale_storage_prepare/` - Storage preparation role
-
-**Modules to Create:**
-1. `plugins/modules/petascale_server.py` - Core server module
-2. `plugins/module_utils/petascale_server_utils.py` - Utility functions
-
-### Phase 2: Lifecycle Management (Priority: High)
-
-**Playbooks to Create:**
-1. `playbooks/petascale_upgrade_playbook.yml` - Upgrade playbook
-2. `playbooks/petascale_uninstall_playbook.yml` - Uninstall playbook
-3. `playbooks/petascale_configure_playbook.yml` - Configuration playbook
-
-**Modules to Create:**
-1. `plugins/modules/petascale_server_configure.py` - Configuration module
-2. `plugins/module_utils/petascale_storage_utils.py` - Storage utilities
-
-### Phase 3: Monitoring and Operations (Priority: Medium)
-
-**Roles to Create:**
-1. `roles/petascale_server_facts/` - Facts gathering role
-
-**Modules to Create:**
-1. `plugins/modules/petascale_server_facts.py` - Facts module
-
-### Phase 4: Documentation (Priority: Medium)
-
-**Guides to Create:**
-1. `docs/guides/petascale-deployment-guide.md` - Step-by-step deployment guide
-2. `docs/guides/petascale-operations-guide.md` - Operations and maintenance guide
-3. `docs/guides/petascale-troubleshooting-guide.md` - Troubleshooting guide
-
-### Phase 5: Configuration and Testing (Priority: Low)
-
-**Configuration Files to Create:**
-1. `playbooks/vars/petascale_vars.yml` - Variable definitions
-2. `playbooks/inventory/petascale.ini` - Inventory template
-3. `tests/integration/targets/petascale/` - Integration tests
-
----
-
-## File Structure Summary
+The configure playbook's HSM Client play emits a comprehensive validation report at the end of each host's execution:
 
 ```
-ansible-ibm-storage-protect/
-├── playbooks/
-│   ├── petascale_install.yml                   # NEW: Main orchestrator
-│   ├── petascale_install_playbook.yml          # NEW: Installation
-│   ├── petascale_upgrade_playbook.yml          # NEW: Upgrade
-│   ├── petascale_uninstall_playbook.yml        # NEW: Uninstall
-│   ├── petascale_configure_playbook.yml        # NEW: Configuration
-│   ├── petascale_storage_prepare_playbook.yml  # NEW: Storage prep
-│   ├── petascale_facts_playbook.yml            # NEW: Facts gathering
-│   ├── inventory/
-│   │   └── petascale.ini                       # NEW: Petascale inventory
-│   └── vars/
-│       └── petascale_vars.yml                  # NEW: Petascale variables
-├── roles/
-│   ├── petascale_server_install/               # NEW: Installation role
-│   │   ├── defaults/main.yml
-│   │   ├── tasks/
-│   │   │   ├── main.yml
-│   │   │   ├── petascale_prechecks_linux.yml
-│   │   │   ├── petascale_install_linux.yml
-│   │   │   ├── petascale_configuration_linux.yml
-│   │   │   ├── petascale_postchecks_linux.yml
-│   │   │   └── petascale_uninstall_linux.yml
-│   │   └── templates/
-│   │       ├── petascale_install_response.xml.j2
-│   │       ├── petascale_basics.j2
-│   │       ├── petascale_policy.j2
-│   │       └── petascale_schedules.j2
-│   ├── petascale_storage_prepare/              # NEW: Storage role
-│   │   ├── defaults/main.yml
-│   │   └── tasks/
-│   │       ├── main.yml
-│   │       ├── petascale_storage_prepare_linux.yml
-│   │       └── petascale_storage_cleanup_linux.yml
-│   └── petascale_server_facts/                 # NEW: Facts role
-│       ├── defaults/main.yml
-│       └── tasks/
-│           └── main.yml
-├── plugins/
-│   ├── modules/
-│   │   ├── petascale_server.py                 # NEW: Server module
-│   │   ├── petascale_server_configure.py       # NEW: Configure module
-│   │   └── petascale_server_facts.py           # NEW: Facts module
-│   └── module_utils/
-│       ├── petascale_server_utils.py           # NEW: Server utilities
-│       └── petascale_storage_utils.py          # NEW: Storage utilities
-├── docs/
-│   ├── design/
-│   │   └── design-peta-scale.md                # THIS DOCUMENT
-│   └── guides/
-│       ├── petascale-deployment-guide.md       # NEW: Deployment guide
-│       ├── petascale-operations-guide.md       # NEW: Operations guide
-│       └── petascale-troubleshooting-guide.md  # NEW: Troubleshooting
-└── tests/
-    └── integration/
-        └── targets/
-            └── petascale/                       # NEW: Integration tests
-                ├── test_petascale_install.yml
-                ├── test_petascale_upgrade.yml
-                └── test_petascale_uninstall.yml
+HSM CLIENT VALIDATION REPORT — hsm-client-03
+═════════════════════════════════════════════
+DMAPI enabled:              ✓ YES
+Firewall port 1500:         ✓ OPEN
+dsm.sys exists:             ✓ /opt/tivoli/tsm/client/hsm/bin/dsm.sys
+dsm.opt exists:             ✓ /opt/tivoli/tsm/client/hsm/bin/dsm.opt
+SP Server stanzas:          ✓ 2 (PETASCALE-SP01, PETASCALE-SP02)
+SSL cert — SP01:            ✓ present
+SSL cert — SP02:            ✓ present
+Connectivity — SP01:        ✓ dsmc query session OK
+Connectivity — SP02:        ✓ dsmc query session OK
+Active binding — fileset_2: ✓ IBMServ=PETASCALE-SP01
+Active binding — fileset_3: ✓ IBMServ=PETASCALE-SP02
+GPFS HSM managed:           ✓ /gpfs_main IS managed
+DR documentation:           ✓ /gpfs2/config/fileset_server_mapping_hsm-client-03.txt
 ```
+
+### 12.2 Common Failure Points and Design Mitigations
+
+| Failure | Mitigation in Design |
+|---|---|
+| SP Server not installed when configure runs | Pre-check in play 4 sets `sp_server_installed` fact; configure play skips if false |
+| DB format timeout | `db_format_timeout` variable; default 1800 s; increase with `-e` |
+| GSKit conflict (SP Server + client on same node) | Node separation enforced at inventory level; each group is processed by a separate play |
+| `expect` absent on client | Task conditionally skipped; warning emitted; operator can install `expect` and re-run |
+| DMAPI enablement fails (filesystem in use) | Error message instructs operator to unmount filesystem, then re-run |
+| Active server binding not set | Fallback chain: `mmapplypolicy` → `mmputattr` → `setfattr`; verification step detects failure |
+| SSL cert not found on SP Server | Task checks `/home/tsminst1/cert256.arm` existence; error message instructs `dsmadmc "generate cert256"` |
+| `/tmp` noexec flag | Pre-check task detects and fails fast with remediation instructions |
+| Incorrect `host_vars` filename | YAML lint and inventory inspection commands documented in troubleshooting guide |
+
+### 12.3 Log File Locations
+
+| Component | Log |
+|---|---|
+| SP Server startup | `/home/tsminst1/server.out` |
+| SP Server admin registration | `/home/tsminst1/admin_register.log` |
+| BA Client errors | `/var/log/tsm/dsmerror_<servername>.log` |
+| BA Client schedule | `/var/log/tsm/dsmsched_<servername>.log` |
+| HSM Client errors | `/var/log/tsm/dsmerror.log` |
+| Ansible run | stdout or `log_path` in `ansible.cfg` |
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-04-01
-**Author**: IBM Storage Protect Ansible Team
-**Status**: Active - Design Phase
+## 13. References
 
-**Note**: This is a design document. All file paths marked as "NEW" or "To Be Created" represent files that will be implemented in future development phases according to the implementation roadmap above.
+### Related Documentation
+
+| Document | Location |
+|---|---|
+| User Guide | `docs/PETASCALE_USER_GUIDE.md` |
+| Configure User Guide | `docs/PETASCALE_CONFIGURE_USER_GUIDE.md` |
+| BA Client Design | `docs/design/design-ba-client.md` |
+| SP Server Design | `docs/design/design-sp-server.md` |
+| HSM/Storage Agent Design | `docs/design/design-storage-agent.md` |
+
+### Key Files
+
+| File | Role |
+|---|---|
+| `playbooks/petascale_install.yml` | Installation orchestrator |
+| `playbooks/petascale_configure.yml` | Configuration orchestrator |
+| `playbooks/petascale_uninstall.yml` | Uninstallation orchestrator |
+| `roles/sp_server_install/tasks/sp_server_configuration_petascale.yml` | SP Server configuration phases 1–6 |
+| `roles/ba_client_install/tasks/ba_client_cert_fix.yml` | SSL certificate import |
+| `roles/ba_client_install/tasks/ba_client_auth_bootstrap.yml` | PASSWORDACCESS GENERATE bootstrap |
+| `roles/hsm_client_install/templates/hsm_active_binding_policy.j2` | GPFS active-server-binding policy template |
+| `playbooks/inventory/petascale.ini` | Inventory (hosts, groups, connection vars) |
+| `playbooks/group_vars/all.yml` | Global defaults |
+| `playbooks/group_vars/sp_servers.yml` | SP Server group defaults |
+| `playbooks/host_vars/sp-server-01.yml` | Per-host SP Server configuration |
+| `playbooks/host_vars/ba-client-01.yml` | Per-host BA Client configuration |
+| `playbooks/host_vars/hsm-client-03.yml` | Per-host HSM Client configuration |
+
