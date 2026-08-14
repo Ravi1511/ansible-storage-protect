@@ -55,24 +55,6 @@
         path: "{{ sp_server_temp_dest }}/{{ sp_server_binary_file_path | basename }}"
         mode: "0755"
 
-    # Detect existing SP Server instances to prevent update errors
-    - name: Detect existing SP Server instances
-      ansible.builtin.shell: |
-        if [ -d "/opt/tivoli/tsm/server/bin" ]; then
-          find /opt/tivoli/tsm -maxdepth 1 -type d -name "tsm*" -o -name "*inst*" 2>/dev/null | xargs -I {} basename {} 2>/dev/null || true
-        fi
-      register: existing_instances_result
-      changed_when: false
-      failed_when: false
-
-    - name: Set existing instances fact
-      ansible.builtin.set_fact:
-        existing_sp_instances: "{{ existing_instances_result.stdout_lines | default([]) }}"
-
-    - name: Display detected instances
-      ansible.builtin.debug:
-        msg: "Detected existing instances: {{ existing_sp_instances | default([]) }}"
-
     # Generate response.xml for installation
     - name: Generate response.xml
       ansible.builtin.template:
@@ -94,9 +76,8 @@
       become: true
 
     # Execute install.sh with the generated response.xml
-    # Note: -skipUpgradeCheck flag is required for SP 8.2.2+ silent installations
     - name: Execute install.sh with response.xml for installation
-      ansible.builtin.command: "./install.sh -s -input {{ sp_server_temp_dest }}/response.xml -acceptLicense -skipUpgradeCheck"
+      ansible.builtin.command: "./install.sh -s -input {{ sp_server_temp_dest }}/response.xml -acceptLicense"
       args:
         chdir: "{{ sp_server_temp_dest }}"
       register: sp_server_installation_result

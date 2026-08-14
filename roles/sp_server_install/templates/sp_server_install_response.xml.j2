@@ -28,12 +28,6 @@
     {% endif %}
     {% endfor %}
   </install>
-  {% if existing_sp_instances is defined and existing_sp_instances | length > 0 %}
-  <!-- Specify update=false for existing instances to prevent update errors during fresh installation -->
-  {% for instance in existing_sp_instances %}
-  <instance id='{{ instance }}' update='false'/>
-  {% endfor %}
-  {% endif %}
   {% for preference in preferences %}
   <preference name="{{ preference.name }}" value="{{ preference.value }}" />
   {% endfor %}

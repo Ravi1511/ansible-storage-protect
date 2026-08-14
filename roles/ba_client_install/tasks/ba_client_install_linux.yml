@@ -5,7 +5,6 @@
   register: ba_client_check
   failed_when: false
   changed_when: false
-  failed_when: false
 
 # Displaying the installation status ( if ba client is installed and still users passes the ba_client_action as install, playbook will terminate )
 - name: Display BA Client status
