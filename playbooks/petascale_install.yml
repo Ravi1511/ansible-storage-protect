@@ -531,11 +531,11 @@
       ansible.builtin.set_fact:
         sp_server_status: >-
           {% if not sp_server_needs_install %}
-            already_installed
+          already_installed
           {% elif sp_server_verify.rc == 0 and 'com.tivoli.dsm.server' in sp_server_verify.stdout %}
-            newly_installed
+          newly_installed
           {% else %}
-            installation_failed
+          installation_failed
           {% endif %}
 
 # ============================================================================
@@ -783,11 +783,11 @@
       ansible.builtin.set_fact:
         hsm_client_status: >-
           {% if not hsm_client_needs_install %}
-            already_installed
+          already_installed
           {% elif hsm_client_verify.rc == 0 %}
-            newly_installed
+          newly_installed
           {% else %}
-            installation_failed
+          installation_failed
           {% endif %}
 
 - name: HSM Client Installation Summary
@@ -1007,11 +1007,11 @@
       ansible.builtin.set_fact:
         ba_client_status: >-
           {% if not ba_client_needs_install %}
-            already_installed
+          already_installed
           {% elif ba_client_verify.rc == 0 %}
-            newly_installed
+          newly_installed
           {% else %}
-            installation_failed
+          installation_failed
           {% endif %}
 
 - name: BA Client Installation Summary

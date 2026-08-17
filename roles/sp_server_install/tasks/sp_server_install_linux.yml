@@ -77,7 +77,13 @@
 
     # Execute install.sh with the generated response.xml
     - name: Execute install.sh with response.xml for installation
-      ansible.builtin.command: "./install.sh -s -input {{ sp_server_temp_dest }}/response.xml -acceptLicense"
+      ansible.builtin.command:
+        argv:
+          - ./install.sh
+          - -s
+          - -input
+          - "{{ sp_server_temp_dest }}/response.xml"
+          - -acceptLicense
       args:
         chdir: "{{ sp_server_temp_dest }}"
       register: sp_server_installation_result
