@@ -647,6 +647,7 @@
       loop: "{{ target_hsm_nodes | default([]) }}"
       when:
         - gpfs_policy_bootstrap_enabled | default(false)
+        - gpfs_policy_register_nodes | default(false)
         - (target_hsm_nodes | default([]) | length) > 0
       no_log: true
 
@@ -661,7 +662,7 @@
           Policy Domain      : {{ gpfs_policy_domain | default('GPFS_DOMAIN') }}
           Policy Set         : {{ gpfs_policy_set | default('STANDARD') }}
           Management Class   : {{ gpfs_mgmt_class | default('GPFS_DAILY') }}
-          Registered Nodes   : {{ target_hsm_nodes | default([]) | map(attribute='node_name') | list | join(', ') if (target_hsm_nodes | default([]) | length) > 0 else 'None mapped to this server' }}
+          Registered Nodes   : {{ target_hsm_nodes | default([]) | map(attribute='node_name') | list | join(', ') if ((target_hsm_nodes | default([]) | length) > 0 and (gpfs_policy_register_nodes | default(false))) else 'None registered (Handled externally / Prerequisite)' }}
           ============================================================
       when: gpfs_policy_bootstrap_enabled | default(false)
 

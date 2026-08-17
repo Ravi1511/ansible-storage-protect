@@ -180,6 +180,8 @@ server_blueprint: false
 # storage pool, policy domain, management class and node registration.
 
 gpfs_policy_bootstrap_enabled: true
+# Controls client node registration (set to true ONLY for internal/developer automated testing)
+gpfs_policy_register_nodes: true
 gpfs_storage_pool_name: "GPFSPOOL"
 gpfs_storage_pool_directory: "/tmp/data"
 gpfs_storage_pool_max_size: "100G"

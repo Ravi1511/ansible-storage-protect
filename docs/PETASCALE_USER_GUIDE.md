@@ -156,6 +156,22 @@ All software packages must be present on the **remote nodes** (target hosts), **
 | Control → Target | SSH | 22 | Ansible communication |
 | Client → SP Server | TCP | 1500 | Component communication |
 
+### 2.4 Petascale Environment Prerequisites (Mandatory in Production)
+
+To deploy Petascale automation successfully in standard production environments, the following external setup tasks must be completed out-of-band:
+
+1. **GPFS Filesystem Partitioning & Mounts**
+   * The IBM Spectrum Scale (GPFS) cluster, filesystems (e.g., `/gpfs_main`), and any independent filesets (e.g., `/gpfs_main/fileset_2`) must already be configured, formatted, and mounted across the client nodes.
+   * The automated playbooks **do not** partition, format, or mount filesystems. They only configure Space Management to manage them.
+
+2. **Client Node Registration on SP Server**
+   * In production customer environments, Storage Protect (SP) Server administrators typically do not permit automated tooling to run client node registration commands.
+   * Therefore, the BA Client and HSM Client node names (e.g., `hsm-client-03-sp01` defined under `sp_servers` in client configurations) **must be registered on the SP Server(s) by a Storage Administrator prior to deployment**.
+   * The configure playbook's client node registration step is **bypassed by default** in production to prevent administrative privilege errors.
+
+> 🧪 **Developer & Automated Testing Note (Optional):**
+> If you are testing the playbooks in a sandbox or isolated development environment where you have full administrative privileges, you can set `gpfs_policy_register_nodes: true` in your SP Server variables file (e.g., `host_vars/sp-server-01.yml`). When enabled, the configure playbook will automatically perform the client node registrations on the SP Server for you.
+
 ---
 
 ## 3. Installation & Setup
@@ -515,6 +531,7 @@ ansible-playbook playbooks/petascale_uninstall.yml \
 | `sp_server_active_log_size` | No | Active log size in MB | `131072` |
 | `tcpport` | No (default `1500`) | SP Server TCP port | `1500` |
 | `gpfs_policy_bootstrap_enabled` | No | Enable GPFS policy bootstrap | `true` |
+| `gpfs_policy_register_nodes` | No | Register client nodes automatically (Testing only) | `false` |
 | `gpfs_storage_pool_name` | No | GPFS storage pool name | `"GPFSPOOL"` |
 | `gpfs_storage_pool_directory` | No | Directory for storage pool | `"/tmp/data"` |
 | `gpfs_policy_domain` | No | TSM policy domain for GPFS | `"GPFS_DOMAIN"` |
